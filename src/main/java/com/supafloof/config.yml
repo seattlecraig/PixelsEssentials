@@ -1,0 +1,29 @@
+# PixelsEssentials Configuration
+# SupaFloof Games, LLC
+
+# ============================================
+# SETHOME MULTIPLE
+# ============================================
+# Defines how many homes each permission tier allows.
+# Players need the permission: pixelsessentials.sethome.<tier>
+# If a player has multiple tier permissions, the highest value is used.
+#
+# Example: A player with pixelsessentials.sethome.hero can set 3 homes.
+#
+sethome-multiple:
+  default: 1
+  adept: 2
+  hero: 3
+  paragon: 5
+  demigod: 7
+  ascendant: 10
+  titan: 15
+  deity: 20
+  sovereign: 25
+  primordial: 30
+  apex: 35
+  eternal: 40
+  cosmic: 45
+  thearchitect: 50
+  ancientgod: 60
+  home100: 100

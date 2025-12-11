@@ -1,0 +1,120 @@
+name: PixelsEssentials
+version: 1.0.0
+main: com.supafloof.pixelsessentials.PixelsEssentials
+api-version: 1.21
+author: SupaFloof Games, LLC
+description: Essential commands for Pixel's Minecraft servers
+
+commands:
+  repair:
+    description: Repair items
+    usage: /repair <hand|all|player>
+    aliases:
+      - fix
+
+  home:
+    description: Teleport to a home or list homes
+    usage: /home [name]
+    aliases:
+      - homes
+
+  sethome:
+    description: Set a home at your current location
+    usage: /sethome [name]
+    aliases:
+      - createhome
+      - addhome
+
+  delhome:
+    description: Delete a home
+    usage: /delhome <name>
+    aliases:
+      - deletehome
+      - removehome
+      - rmhome
+
+  homeinfo:
+    description: Show home count or information about a specific home
+    usage: /homeinfo [name]
+    aliases:
+      - hinfo
+
+  pixelsessentials:
+    description: PixelsEssentials main command
+    usage: /pixelsessentials <reload>
+    aliases:
+      - pe
+      - pess
+
+  autofeed:
+    description: Toggle automatic hunger restoration
+    usage: /autofeed <on|off>
+    aliases:
+      - af
+
+  back:
+    description: Return to your previous location (before teleport or death)
+    usage: /back
+    aliases:
+      - return
+
+permissions:
+  pixelsessentials.repair.hand:
+    description: Allows repairing the item in hand
+    default: op
+
+  pixelsessentials.repair.all:
+    description: Allows repairing all items in inventory
+    default: op
+
+  pixelsessentials.repair.player:
+    description: Allows repairing another player's items
+    default: op
+
+  pixelsessentials.home:
+    description: Allows using the home teleport command
+    default: true
+
+  pixelsessentials.sethome:
+    description: Allows setting homes
+    default: true
+
+  pixelsessentials.delhome:
+    description: Allows deleting homes
+    default: true
+
+  pixelsessentials.homeinfo:
+    description: Allows viewing home information
+    default: true
+
+  pixelsessentials.reload:
+    description: Allows reloading the plugin configuration
+    default: op
+
+  pixelsessentials.debug:
+    description: Allows toggling debug mode
+    default: op
+
+  pixelsessentials.keepxp:
+    description: Keep XP on death
+    default: false
+
+  pixelsessentials.keepinv:
+    description: Keep inventory on death
+    default: false
+
+  pixelsessentials.keeppos:
+    description: Respawn at death location
+    default: false
+
+  pixelsessentials.autofeed:
+    description: Allows using autofeed to automatically restore hunger
+    default: false
+
+  pixelsessentials.back:
+    description: Allows returning to previous location
+    default: true
+
+  pixelsessentials.back.ondeath:
+    description: Allows returning to death location with /back
+    default: false
