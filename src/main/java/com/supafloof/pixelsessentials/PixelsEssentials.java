@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -28,6 +29,11 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
+import org.bukkit.enchantments.Enchantment;
+
+import dev.lone.itemsadder.api.CustomStack;
 
 import java.io.*;
 import java.util.*;
@@ -196,6 +202,9 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         getCommand("back").setExecutor(this);
         getCommand("back").setTabCompleter(this);
+        
+        getCommand("giveenchanteditem").setExecutor(this);
+        getCommand("giveenchanteditem").setTabCompleter(this);
         
         // Register event listener for location tracking
         // Handles PlayerTeleportEvent, PlayerDeathEvent, and PlayerQuitEvent
@@ -511,6 +520,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return handleAutofeedCommand(sender, args);
             case "back":
                 return handleBackCommand(sender);
+            case "giveenchanteditem":
+                return handleGiveEnchantedItemCommand(sender, args);
             case "pixelsessentials":
                 return handleMainCommand(sender, args);
             default:
@@ -1677,6 +1688,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return tabCompleteHomeNames(sender, args);
             case "autofeed":
                 return tabCompleteAutofeed(sender, args);
+            case "giveenchanteditem":
+                return tabCompleteGiveEnchantedItem(sender, args);
             case "pixelsessentials":
                 return tabCompleteMain(sender, args);
             default:
@@ -1761,6 +1774,287 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             completions.add("on");
             completions.add("off");
             return filterCompletions(completions, args[0]);
+        }
+        
+        return completions;
+    }
+    
+    // ==================================================================================
+    // GIVE ENCHANTED ITEM COMMAND
+    // ==================================================================================
+    
+    /**
+     * Handles the /giveenchanteditem command.
+     * 
+     * <p>Gives an ItemsAdder custom item with optional enchantments to a player.</p>
+     * 
+     * <p><b>Usage:</b> /giveenchanteditem &lt;player&gt; &lt;ia_item&gt; [enchant:level]...</p>
+     * <p><b>Example:</b> /giveenchanteditem Craig sapphire_knight_set:sapphire_sword sharpness:5 unbreaking:3</p>
+     * 
+     * <p><b>Permission:</b> pixelsessentials.giveenchanteditem</p>
+     * 
+     * @param sender The command sender
+     * @param args The command arguments
+     * @return true if command was handled
+     */
+    /**
+     * Handles the /giveenchanteditem (gei) command.
+     * 
+     * <p>Gives an ItemsAdder custom item with optional count, custom name, lore, and enchantments.</p>
+     * 
+     * <p><b>Usage:</b> /gei &lt;player&gt; &lt;ia_item&gt; [count] [name:Custom_Name] [lore:Custom_Lore] [enchant:level]...</p>
+     * <p><b>Example:</b> /gei Craig fairyset:fairy_helmet 1 name:&amp;6&amp;oAzathoth's_Helmet lore:&amp;7&amp;oThe_Helmet protection:30 mending aqua_affinity</p>
+     * 
+     * <p>Underscores in name: and lore: values are converted to spaces.</p>
+     * <p>Enchantments without a level default to level 1 (e.g., "aqua_affinity" = "aqua_affinity:1").</p>
+     * 
+     * @param sender The command sender
+     * @param args The command arguments
+     * @return true if command was handled
+     */
+    private boolean handleGiveEnchantedItemCommand(CommandSender sender, String[] args) {
+        // Check permission
+        if (!sender.hasPermission("pixelsessentials.giveenchanteditem")) {
+            sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+            return true;
+        }
+        
+        // Check arguments
+        if (args.length < 2) {
+            sender.sendMessage(Component.text("Usage: /gei <player> <ia_item> [count] [name:Name] [lore:Lore] [enchant:level]...", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Example: /gei Craig fairyset:fairy_helmet 1 name:&6&oAzathoth's_Helmet protection:30 mending", NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("Note: Underscores become spaces in name/lore. Enchants without :level default to 1.", NamedTextColor.GRAY));
+            return true;
+        }
+        
+        // Get target player
+        String playerName = args[0];
+        Player target = Bukkit.getPlayer(playerName);
+        
+        if (target == null) {
+            sender.sendMessage(Component.text("Player not found: " + playerName, NamedTextColor.RED));
+            return true;
+        }
+        
+        String itemId = args[1];
+        
+        // Get the ItemsAdder custom item
+        CustomStack customStack = CustomStack.getInstance(itemId);
+        if (customStack == null) {
+            sender.sendMessage(Component.text("Unknown ItemsAdder item: " + itemId, NamedTextColor.RED));
+            return true;
+        }
+        
+        // Get the ItemStack from the custom item
+        ItemStack itemStack = customStack.getItemStack();
+        if (itemStack == null) {
+            sender.sendMessage(Component.text("Failed to create item: " + itemId, NamedTextColor.RED));
+            return true;
+        }
+        
+        // Parse optional arguments
+        int count = 1;
+        String customName = null;
+        String customLore = null;
+        List<String> appliedEnchants = new ArrayList<>();
+        List<String> failedEnchants = new ArrayList<>();
+        
+        for (int i = 2; i < args.length; i++) {
+            String arg = args[i];
+            
+            // Check for name: prefix
+            if (arg.toLowerCase().startsWith("name:")) {
+                customName = arg.substring(5).replace('_', ' ');
+                // Translate color codes
+                customName = ChatColor.translateAlternateColorCodes('&', customName);
+                continue;
+            }
+            
+            // Check for lore: prefix
+            if (arg.toLowerCase().startsWith("lore:")) {
+                customLore = arg.substring(5).replace('_', ' ');
+                // Translate color codes
+                customLore = ChatColor.translateAlternateColorCodes('&', customLore);
+                continue;
+            }
+            
+            // Check if it's a plain number (count)
+            if (arg.matches("^\\d+$")) {
+                try {
+                    count = Integer.parseInt(arg);
+                    if (count < 1) count = 1;
+                    if (count > 64) count = 64;
+                } catch (NumberFormatException e) {
+                    // Ignore, keep default count
+                }
+                continue;
+            }
+            
+            // Otherwise treat as enchantment
+            String enchantName;
+            int level;
+            
+            if (arg.contains(":")) {
+                // Format: enchant:level
+                String[] parts = arg.split(":");
+                enchantName = parts[0].toLowerCase();
+                try {
+                    level = Integer.parseInt(parts[1]);
+                } catch (NumberFormatException e) {
+                    failedEnchants.add(arg + " (invalid level)");
+                    continue;
+                }
+            } else {
+                // Format: enchant (default to level 1)
+                enchantName = arg.toLowerCase();
+                level = 1;
+            }
+            
+            // Look up enchantment by name using Registry (1.21+)
+            NamespacedKey key = NamespacedKey.minecraft(enchantName);
+            Enchantment enchantment = Registry.ENCHANTMENT.get(key);
+            
+            if (enchantment == null) {
+                failedEnchants.add(arg + " (unknown enchantment)");
+                continue;
+            }
+            
+            // Apply enchantment (unsafe to allow any level)
+            itemStack.addUnsafeEnchantment(enchantment, level);
+            appliedEnchants.add(enchantName + ":" + level);
+        }
+        
+        // Apply custom name and lore if specified
+        if (customName != null || customLore != null) {
+            ItemMeta meta = itemStack.getItemMeta();
+            if (meta != null) {
+                // Preserve existing lore if we're adding to it
+                List<String> existingLore = meta.getLore();
+                
+                if (customName != null) {
+                    meta.setDisplayName(customName);
+                }
+                if (customLore != null) {
+                    List<String> loreList = new ArrayList<>();
+                    if (existingLore != null) {
+                        loreList.addAll(existingLore);
+                    }
+                    loreList.add(customLore);
+                    meta.setLore(loreList);
+                }
+                
+                itemStack.setItemMeta(meta);
+            }
+        }
+        
+        // Set count
+        itemStack.setAmount(count);
+        
+        // Give the item to the target player
+        HashMap<Integer, ItemStack> leftover = target.getInventory().addItem(itemStack);
+        
+        if (!leftover.isEmpty()) {
+            // Inventory full, drop at player's feet
+            for (ItemStack drop : leftover.values()) {
+                target.getWorld().dropItemNaturally(target.getLocation(), drop);
+            }
+            sender.sendMessage(Component.text(target.getName() + "'s inventory full - item dropped at their feet.", NamedTextColor.YELLOW));
+        }
+        
+        // Send result message
+        StringBuilder msg = new StringBuilder();
+        msg.append("Given ").append(target.getName()).append(" ").append(count).append("x ").append(itemId);
+        
+        if (customName != null) {
+            msg.append(" named \"").append(customName).append("\"");
+        }
+        
+        if (!appliedEnchants.isEmpty()) {
+            msg.append(" with enchantments: ").append(String.join(", ", appliedEnchants));
+        }
+        
+        sender.sendMessage(Component.text(msg.toString(), NamedTextColor.GREEN));
+        
+        if (!failedEnchants.isEmpty()) {
+            sender.sendMessage(Component.text("Failed to apply: " + String.join(", ", failedEnchants), NamedTextColor.RED));
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Tab completion for /giveenchanteditem command.
+     * 
+     * <p>Provides completion for player names, count, name:, lore:, and enchantment names.</p>
+     */
+    private List<String> tabCompleteGiveEnchantedItem(CommandSender sender, String[] args) {
+        List<String> completions = new ArrayList<>();
+        
+        if (!sender.hasPermission("pixelsessentials.giveenchanteditem")) {
+            return completions;
+        }
+        
+        if (args.length == 1) {
+            // First argument - player names
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                completions.add(player.getName());
+            }
+            return filterCompletions(completions, args[0]);
+        }
+        
+        if (args.length == 2) {
+            // Second argument - item ID (no completion, user types it)
+            return completions;
+        }
+        
+        if (args.length >= 3) {
+            String currentArg = args[args.length - 1].toLowerCase();
+            
+            // Suggest name: and lore: prefixes
+            if ("name:".startsWith(currentArg)) {
+                completions.add("name:");
+            }
+            if ("lore:".startsWith(currentArg)) {
+                completions.add("lore:");
+            }
+            
+            // Suggest common counts
+            if (currentArg.isEmpty() || currentArg.matches("^\\d*$")) {
+                completions.add("1");
+                completions.add("16");
+                completions.add("32");
+                completions.add("64");
+            }
+            
+            // Suggest common enchantment names
+            String[] commonEnchants = {
+                "sharpness", "smite", "bane_of_arthropods", "knockback", "fire_aspect",
+                "looting", "sweeping_edge", "efficiency", "silk_touch", "unbreaking",
+                "fortune", "power", "punch", "flame", "infinity", "luck_of_the_sea",
+                "lure", "loyalty", "impaling", "riptide", "channeling", "multishot",
+                "quick_charge", "piercing", "mending", "vanishing_curse", "binding_curse",
+                "protection", "fire_protection", "feather_falling", "blast_protection",
+                "projectile_protection", "respiration", "aqua_affinity", "thorns",
+                "depth_strider", "frost_walker", "soul_speed", "swift_sneak"
+            };
+            
+            // If user hasn't typed a colon yet, suggest enchantment names
+            if (!currentArg.contains(":") || currentArg.startsWith("name:") || currentArg.startsWith("lore:")) {
+                for (String enchant : commonEnchants) {
+                    if (enchant.startsWith(currentArg)) {
+                        completions.add(enchant + ":");
+                        completions.add(enchant); // Also suggest without colon (defaults to level 1)
+                    }
+                }
+            } else {
+                // User has typed enchant:, suggest levels
+                String enchantPart = currentArg.split(":")[0];
+                for (int level = 1; level <= 10; level++) {
+                    completions.add(enchantPart + ":" + level);
+                }
+            }
+            
+            return filterCompletions(completions, currentArg);
         }
         
         return completions;

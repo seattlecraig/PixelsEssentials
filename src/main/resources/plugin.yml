@@ -4,6 +4,8 @@ main: com.supafloof.pixelsessentials.PixelsEssentials
 api-version: 1.21
 author: SupaFloof Games, LLC
 description: Essential commands for Pixel's Minecraft servers
+softdepend:
+  - ItemsAdder
 
 commands:
   repair:
@@ -57,6 +59,12 @@ commands:
     usage: /back
     aliases:
       - return
+
+  giveenchanteditem:
+    description: Give an ItemsAdder item with optional enchantments
+    usage: /giveenchanteditem <player> <ia_item> [enchant:level]...
+    aliases:
+      - gei
 
 permissions:
   pixelsessentials.repair.hand:
@@ -118,3 +126,7 @@ permissions:
   pixelsessentials.back.ondeath:
     description: Allows returning to death location with /back
     default: false
+
+  pixelsessentials.giveenchanteditem:
+    description: Allows giving ItemsAdder items with enchantments
+    default: op
