@@ -1,0 +1,192 @@
+=====================================
+PIXELSESSENTIALS GUIDE
+=====================================
+A player's guide to PixelsEssentials
+By SupaFloof Games
+=====================================
+PAGE 1
+=====================================
+Welcome to PixelsEssentials!
+
+This book teaches you how to use the plugin's features:
+
+- Home System
+- Back Command
+- Repair Commands
+- Autofeed
+
+Turn the page to begin!
+=====================================
+PAGE 2
+=====================================
+HOME SYSTEM
+
+Save locations and teleport back to them anytime.
+
+Commands:
+/home - List your homes
+/home <n> - Teleport to home
+/sethome - Set home named "home"
+/sethome <n> - Set named home
+/delhome <n> - Delete a home
+=====================================
+PAGE 3
+=====================================
+SETTING HOMES
+
+Stand where you want your home, then type:
+
+/sethome
+
+This creates a home called "home".
+
+For a custom name:
+/sethome base
+/sethome farm
+/sethome mine
+
+Names can use letters, numbers, underscores, and dashes.
+=====================================
+PAGE 4
+=====================================
+TELEPORTING HOME
+
+To go to your default home:
+/home home
+
+To go to a named home:
+/home farm
+
+To see all your homes:
+/home
+or
+/homes
+=====================================
+PAGE 5
+=====================================
+HOME INFO
+
+To see coordinates of a home:
+/homeinfo farm
+
+This shows the world name and X, Y, Z location.
+
+To see how many homes you have:
+/homeinfo
+=====================================
+PAGE 6
+=====================================
+DELETING HOMES
+
+To remove a saved home:
+
+/delhome farm
+
+The home is permanently deleted. You can create a new one with the same name later.
+=====================================
+PAGE 7
+=====================================
+BACK COMMAND
+
+Returns you to your previous location.
+
+After teleporting somewhere:
+/back
+
+This takes you back to where you were standing before.
+=====================================
+PAGE 8
+=====================================
+BACK AFTER DEATH
+
+If you die, /back can return you to your death spot.
+
+Simply type:
+/back
+
+Note: Returning to death locations may require special permission.
+=====================================
+PAGE 9
+=====================================
+REPAIR COMMANDS
+
+Fix your damaged items!
+
+/repair hand
+Repairs the item you're holding.
+
+/repair all
+Repairs everything in your inventory and armor.
+=====================================
+PAGE 10
+=====================================
+REPAIR TIPS
+
+- Only damaged items can be repaired (tools, weapons, armor)
+
+- Items already at full durability show a message
+
+- Repair all includes your hotbar, inventory, armor, and offhand
+=====================================
+PAGE 11
+=====================================
+AUTOFEED
+
+Automatically keeps you fed!
+
+/autofeed on
+Enable autofeed
+
+/autofeed off
+Disable autofeed
+
+/autofeed
+Check current status
+=====================================
+PAGE 12
+=====================================
+HOW AUTOFEED WORKS
+
+When enabled, your hunger bar is automatically restored when it gets low.
+
+You never need to eat manually while autofeed is on!
+
+Your setting is saved between sessions.
+=====================================
+PAGE 13
+=====================================
+DEATH PROTECTIONS
+
+You may have special protections when you die:
+
+Keep Inventory
+Your items stay with you.
+
+Keep XP
+Your experience is preserved.
+
+Keep Position
+You respawn where you died.
+=====================================
+PAGE 14
+=====================================
+COMMAND SUMMARY
+
+/home [name] - Teleport
+/sethome [name] - Save
+/delhome <n> - Delete
+/homeinfo [name] - Info
+/back - Previous location
+/repair hand - Fix held
+/repair all - Fix all
+/autofeed - Toggle feed
+=====================================
+PAGE 15
+=====================================
+Thank you for reading!
+
+PixelsEssentials
+by SupaFloof Games, LLC
+
+Enjoy your adventure!
+=====================================
