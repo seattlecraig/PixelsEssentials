@@ -35,6 +35,12 @@ import org.bukkit.enchantments.Enchantment;
 
 import dev.lone.itemsadder.api.CustomStack;
 
+import me.clip.placeholderapi.expansion.PlaceholderExpansion;
+import net.milkbowl.vault.economy.Economy;
+import org.bukkit.plugin.RegisteredServiceProvider;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
 import java.io.*;
 import java.util.*;
 
@@ -152,6 +158,12 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     private Map<UUID, Location> deathLocations = new HashMap<>();
     
     /**
+     * Vault economy provider for balance placeholders.
+     * May be null if Vault or an economy plugin is not installed.
+     */
+    private Economy economy = null;
+    
+    /**
      * Plugin initialization method called by Bukkit when the plugin is enabled.
      * 
      * <p><b>Initialization Steps:</b></p>
@@ -209,6 +221,21 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         // Register event listener for location tracking
         // Handles PlayerTeleportEvent, PlayerDeathEvent, and PlayerQuitEvent
         getServer().getPluginManager().registerEvents(this, this);
+        
+        // Setup Vault economy integration
+        if (getServer().getPluginManager().getPlugin("Vault") != null) {
+            RegisteredServiceProvider<Economy> rsp = getServer().getServicesManager().getRegistration(Economy.class);
+            if (rsp != null) {
+                economy = rsp.getProvider();
+                getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Vault economy hooked successfully!", NamedTextColor.GREEN));
+            }
+        }
+        
+        // Register PlaceholderAPI expansion
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new PixelsEssentialsExpansion(this).register();
+            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] PlaceholderAPI expansion registered!", NamedTextColor.GREEN));
+        }
         
         // Send startup messages to console with Adventure API colored text
         // Green for main message, light purple (magenta) for author credit
@@ -2224,6 +2251,155 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             }
             
             return new Location(bukkitWorld, x, y, z, yaw, pitch);
+        }
+    }
+    
+    // ==================================================================================
+    // PLACEHOLDERAPI EXPANSION
+    // ==================================================================================
+    
+    /**
+     * PlaceholderAPI expansion for PixelsEssentials.
+     * 
+     * <p><b>Supported Placeholders:</b></p>
+     * <ul>
+     *   <li><b>%pixelsessentials_current_health%</b> - Player's current health with 1 decimal (e.g., 20.0, 15.5)</li>
+     *   <li><b>%pixelsessentials_max_health%</b> - Player's max health with 1 decimal (e.g., 20.0, 40.0)</li>
+     *   <li><b>%pixelsessentials_formatted_balance%</b> - Formatted economy balance:
+     *       <ul>
+     *         <li>Under 1M: Integer with commas (e.g., 12,375 or 993,113)</li>
+     *         <li>Millions: X.XX M (e.g., 35.45 M)</li>
+     *         <li>Billions: X.XX B (e.g., 135.22 B)</li>
+     *         <li>Trillions+: X.XX T (e.g., 1.36 T)</li>
+     *       </ul>
+     *   </li>
+     * </ul>
+     */
+    private class PixelsEssentialsExpansion extends PlaceholderExpansion {
+        
+        /** Reference to the main plugin instance */
+        private final PixelsEssentials plugin;
+        
+        /**
+         * Constructs a new expansion instance.
+         * 
+         * @param plugin The main plugin instance
+         */
+        public PixelsEssentialsExpansion(PixelsEssentials plugin) {
+            this.plugin = plugin;
+        }
+        
+        /**
+         * Returns the identifier for this expansion.
+         * Placeholders will use: %pixelsessentials_placeholder%
+         * 
+         * @return The expansion identifier
+         */
+        @Override
+        public @NotNull String getIdentifier() {
+            return "pixelsessentials";
+        }
+        
+        /**
+         * Returns the author of this expansion.
+         * 
+         * @return The author name
+         */
+        @Override
+        public @NotNull String getAuthor() {
+            return "SupaFloof Games, LLC";
+        }
+        
+        /**
+         * Returns the version of this expansion.
+         * 
+         * @return The version string
+         */
+        @Override
+        public @NotNull String getVersion() {
+            return plugin.getDescription().getVersion();
+        }
+        
+        /**
+         * Indicates this expansion should persist through PlaceholderAPI reloads.
+         * 
+         * @return true to persist
+         */
+        @Override
+        public boolean persist() {
+            return true;
+        }
+        
+        /**
+         * Processes placeholder requests.
+         * 
+         * @param player The player requesting the placeholder (may be null for non-player contexts)
+         * @param params The placeholder identifier (everything after pixelsessentials_)
+         * @return The placeholder value, or null if not recognized
+         */
+        @Override
+        public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
+            if (player == null) {
+                return null;
+            }
+            
+            switch (params.toLowerCase()) {
+                case "current_health":
+                    // Return current health with exactly 1 decimal point
+                    return String.format("%.1f", player.getHealth());
+                    
+                case "max_health":
+                    // Return max health with exactly 1 decimal point
+                    // Uses getAttribute for accurate max health including modifiers
+                    double maxHealth = player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+                    return String.format("%.1f", maxHealth);
+                    
+                case "formatted_balance":
+                    // Return formatted balance from Vault economy
+                    if (plugin.economy == null) {
+                        return "0";
+                    }
+                    double balance = plugin.economy.getBalance(player);
+                    return formatBalance(balance);
+                    
+                default:
+                    return null;
+            }
+        }
+        
+        /**
+         * Formats a balance value according to the specified rules:
+         * - Under 1 million: Integer with commas (e.g., 12,375)
+         * - Millions: X.XX M (e.g., 35.45 M)
+         * - Billions: X.XX B (e.g., 135.22 B)
+         * - Trillions+: X.XX T (e.g., 1.36 T)
+         * 
+         * @param balance The balance to format
+         * @return The formatted balance string
+         */
+        private String formatBalance(double balance) {
+            if (balance < 0) {
+                // Handle negative balances
+                return "-" + formatBalance(-balance);
+            }
+            
+            final double TRILLION = 1_000_000_000_000.0;
+            final double BILLION = 1_000_000_000.0;
+            final double MILLION = 1_000_000.0;
+            
+            if (balance >= TRILLION) {
+                // Trillions: X.XX T
+                return String.format("%.2f T", balance / TRILLION);
+            } else if (balance >= BILLION) {
+                // Billions: X.XX B
+                return String.format("%.2f B", balance / BILLION);
+            } else if (balance >= MILLION) {
+                // Millions: X.XX M
+                return String.format("%.2f M", balance / MILLION);
+            } else {
+                // Under 1 million: Integer with commas
+                return String.format("%,d", (long) balance);
+            }
         }
     }
 }

@@ -6,7 +6,8 @@ author: SupaFloof Games, LLC
 description: Essential commands for Pixel's Minecraft servers
 softdepend:
   - ItemsAdder
-
+  - PlaceholderAPI
+  - Vault
 commands:
   repair:
     description: Repair items
