@@ -3,11 +3,17 @@ package com.supafloof.pixelsessentials;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Keyed;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.Sign;
+import org.bukkit.block.sign.Side;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -19,8 +25,11 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -43,6 +52,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PixelsEssentials Plugin
@@ -60,6 +70,9 @@ import java.util.*;
  *   <li>Permission-based home limits with tiered permission groups</li>
  *   <li>Tab completion for all commands and home names</li>
  *   <li>Hot-reload capability for configuration changes</li>
+ *   <li>Balance leaderboard signs showing top richest players</li>
+ *   <li>PlaceholderAPI integration for health and formatted balance</li>
+ *   <li>Automatic recipe unlock on player join (configurable)</li>
  * </ul>
  * 
  * <p><b>Commands:</b></p>
@@ -74,6 +87,22 @@ import java.util.*;
  *   <li><b>/delhome &lt;name&gt;</b> - Deletes a home (pixelsessentials.delhome)</li>
  *   <li><b>/homeinfo &lt;name&gt;</b> - Shows coordinates of a home (pixelsessentials.homeinfo)</li>
  *   <li><b>/pixelsessentials reload</b> - Reloads config (pixelsessentials.reload)</li>
+ *   <li><b>/pixelsessentials show &lt;place&gt;</b> - Create balance leaderboard sign (pixelsessentials.show)</li>
+ * </ul>
+ * 
+ * <p><b>PlaceholderAPI Placeholders:</b></p>
+ * <ul>
+ *   <li><b>%pixelsessentials_current_health%</b> - Current health with 1 decimal (e.g., 20.0)</li>
+ *   <li><b>%pixelsessentials_max_health%</b> - Max health with 1 decimal (e.g., 20.0)</li>
+ *   <li><b>%pixelsessentials_formatted_balance%</b> - Formatted balance (e.g., 12,375 or 35.45 M)</li>
+ *   <li><b>%pixelsessentials_helmet_total_durability%</b> - Max durability of helmet</li>
+ *   <li><b>%pixelsessentials_helmet_current_durability%</b> - Current durability of helmet</li>
+ *   <li><b>%pixelsessentials_chestplate_total_durability%</b> - Max durability of chestplate</li>
+ *   <li><b>%pixelsessentials_chestplate_current_durability%</b> - Current durability of chestplate</li>
+ *   <li><b>%pixelsessentials_leggings_total_durability%</b> - Max durability of leggings</li>
+ *   <li><b>%pixelsessentials_leggings_current_durability%</b> - Current durability of leggings</li>
+ *   <li><b>%pixelsessentials_boots_total_durability%</b> - Max durability of boots</li>
+ *   <li><b>%pixelsessentials_boots_current_durability%</b> - Current durability of boots</li>
  * </ul>
  * 
  * <p><b>Permission Tiers for Home Limits:</b></p>
@@ -163,6 +192,55 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      */
     private Economy economy = null;
     
+    // ==================================================================================
+    // BALANCE LEADERBOARD SIGNS
+    // ==================================================================================
+    
+    /**
+     * Balance leaderboard sign locations and their placement numbers.
+     * Key: Block location of the sign
+     * Value: Placement number (1 = richest, 2 = second richest, etc.)
+     * ConcurrentHashMap for thread-safety during sign updates.
+     */
+    private Map<Location, Integer> balanceSigns = new ConcurrentHashMap<>();
+    
+    /**
+     * Pending sign creation - waiting for player to right-click a sign.
+     * Key: Player UUID who executed /pe show command
+     * Value: Placement number to assign to the next sign they right-click
+     */
+    private Map<UUID, Integer> pendingBalanceSigns = new ConcurrentHashMap<>();
+    
+    /**
+     * Sign update interval in seconds (how often signs refresh with latest data).
+     * Default: 60 seconds
+     */
+    private int signUpdateInterval = 60;
+    
+    /**
+     * Whether to unlock all recipes for players when they join.
+     * Configured via unlock-recipes in config.yml. Default: false
+     */
+    private boolean unlockRecipesOnJoin = false;
+    
+    /**
+     * Cache of top balances to avoid repeated economy lookups.
+     * Key: Placement (1-indexed)
+     * Value: Entry containing player UUID and balance
+     */
+    private List<Map.Entry<UUID, Double>> topBalancesCache = null;
+    
+    /**
+     * Timestamp of when the top balances cache was last updated.
+     */
+    private long topBalancesCacheTime = 0;
+    
+    /**
+     * How long the top balances cache remains valid (in milliseconds).
+     * Default: 5 seconds
+     */
+    private static final long BALANCE_CACHE_VALIDITY_MS = 5000;
+    
     /**
      * Plugin initialization method called by Bukkit when the plugin is enabled.
      * 
@@ -237,6 +315,24 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] PlaceholderAPI expansion registered!", NamedTextColor.GREEN));
         }
         
+        // Load balance leaderboard signs
+        loadBalanceSigns();
+        
+        // Start sign update task
+        signUpdateInterval = getConfig().getInt("sign-update-interval", 60);
+        if (economy != null) {
+            startSignUpdateTask();
+            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Balance leaderboard signs enabled (update interval: " + signUpdateInterval + "s)", NamedTextColor.GREEN));
+        } else {
+            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] WARNING: Vault economy not found - balance leaderboard signs will not work!", NamedTextColor.YELLOW));
+        }
+        
+        // Load unlock-recipes config option
+        unlockRecipesOnJoin = getConfig().getBoolean("unlock-recipes", false);
+        if (unlockRecipesOnJoin) {
+            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Recipe unlock on join enabled", NamedTextColor.GREEN));
+        }
+        
         // Send startup messages to console with Adventure API colored text
         // Green for main message, light purple (magenta) for author credit
         // Uses Adventure API Component instead of legacy color codes
@@ -260,6 +356,11 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         // Clear caches
         playerDataCache.clear();
         deathLocations.clear();
+        
+        // Save balance leaderboard signs
+        saveBalanceSigns();
+        balanceSigns.clear();
+        pendingBalanceSigns.clear();
         
         // Send shutdown message to console in red
         // Indicates the plugin has stopped cleanly
@@ -462,6 +563,72 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         // Clean up death location if player quit before respawning
         deathLocations.remove(uuid);
+        
+        // Clean up any pending sign creation
+        pendingBalanceSigns.remove(uuid);
+    }
+    
+    /**
+     * Handles player right-click on signs to create balance leaderboard signs.
+     * 
+     * <p>When a player has a pending sign creation (from /pe show command),
+     * right-clicking a sign will convert it to a balance leaderboard sign.</p>
+     * 
+     * @param event The PlayerInteractEvent
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (event.getClickedBlock() == null) return;
+        if (!(event.getClickedBlock().getState() instanceof Sign)) return;
+        
+        Player player = event.getPlayer();
+        Integer pendingPlace = pendingBalanceSigns.get(player.getUniqueId());
+        
+        if (pendingPlace != null) {
+            Location loc = event.getClickedBlock().getLocation();
+            balanceSigns.put(loc, pendingPlace);
+            updateBalanceSign(loc, pendingPlace);
+            pendingBalanceSigns.remove(player.getUniqueId());
+            saveBalanceSigns();
+            
+            player.sendMessage(Component.text("Balance leaderboard sign #" + pendingPlace + " created successfully!", NamedTextColor.GREEN));
+            event.setCancelled(true);
+        }
+    }
+    
+    /**
+     * Handles player join events to unlock all recipes if configured.
+     * 
+     * <p>When unlock-recipes is true in config.yml, all registered recipes
+     * (vanilla and custom) are discovered for the player on join.</p>
+     * 
+     * @param event The PlayerJoinEvent
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        if (!unlockRecipesOnJoin) return;
+        
+        Player player = event.getPlayer();
+        int unlocked = 0;
+        
+        // Iterate through all registered recipes
+        Iterator<org.bukkit.inventory.Recipe> recipeIterator = Bukkit.recipeIterator();
+        while (recipeIterator.hasNext()) {
+            org.bukkit.inventory.Recipe recipe = recipeIterator.next();
+            
+            // Only Keyed recipes can be discovered
+            if (recipe instanceof Keyed) {
+                NamespacedKey key = ((Keyed) recipe).getKey();
+                if (player.discoverRecipe(key)) {
+                    unlocked++;
+                }
+            }
+        }
+        
+        if (debugMode && unlocked > 0) {
+            getLogger().info("Unlocked " + unlocked + " new recipes for " + player.getName());
+        }
     }
     
     /**
@@ -1389,6 +1556,12 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 sender.sendMessage(Component.text("/pe debug <on|off>", NamedTextColor.YELLOW)
                     .append(Component.text(" - Toggle debug logging", NamedTextColor.GRAY)));
             }
+            if (sender.hasPermission("pixelsessentials.show")) {
+                sender.sendMessage(Component.text("/pe show <place>", NamedTextColor.YELLOW)
+                    .append(Component.text(" - Create balance leaderboard sign", NamedTextColor.GRAY)));
+                sender.sendMessage(Component.text("/pe updatesigns", NamedTextColor.YELLOW)
+                    .append(Component.text(" - Force update all balance signs", NamedTextColor.GRAY)));
+            }
             return true;
         }
         
@@ -1401,6 +1574,10 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             
             // Reload config
             reloadConfig();
+            
+            // Reload config values
+            unlockRecipesOnJoin = getConfig().getBoolean("unlock-recipes", false);
+            signUpdateInterval = getConfig().getInt("sign-update-interval", 60);
             
             // Clear player data cache so it reloads from disk on next access
             playerDataCache.clear();
@@ -1435,6 +1612,68 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             } else {
                 sender.sendMessage(Component.text("Usage: /pe debug <on|off>", NamedTextColor.RED));
             }
+            return true;
+        }
+        
+        if (args[0].equalsIgnoreCase("show")) {
+            // Check permission
+            if (!sender.hasPermission("pixelsessentials.show")) {
+                sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+                return true;
+            }
+            
+            // Must be a player
+            if (!(sender instanceof Player)) {
+                sender.sendMessage(Component.text("Only players can use this command!", NamedTextColor.RED));
+                return true;
+            }
+            
+            // Check if Vault economy is available
+            if (economy == null) {
+                sender.sendMessage(Component.text("Vault economy is not available!", NamedTextColor.RED));
+                return true;
+            }
+            
+            if (args.length < 2) {
+                sender.sendMessage(Component.text("Usage: /pe show <place>", NamedTextColor.RED));
+                sender.sendMessage(Component.text("Example: /pe show 1 (creates 1st place sign)", NamedTextColor.GRAY));
+                return true;
+            }
+            
+            int place;
+            try {
+                place = Integer.parseInt(args[1]);
+                if (place < 1) {
+                    sender.sendMessage(Component.text("Place must be 1 or higher!", NamedTextColor.RED));
+                    return true;
+                }
+            } catch (NumberFormatException e) {
+                sender.sendMessage(Component.text("Invalid place number!", NamedTextColor.RED));
+                return true;
+            }
+            
+            Player player = (Player) sender;
+            pendingBalanceSigns.put(player.getUniqueId(), place);
+            
+            sender.sendMessage(Component.text("Right-click a sign to make it a #" + place + " balance leaderboard sign!", NamedTextColor.GREEN));
+            return true;
+        }
+        
+        if (args[0].equalsIgnoreCase("updatesigns")) {
+            // Check permission
+            if (!sender.hasPermission("pixelsessentials.show")) {
+                sender.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+                return true;
+            }
+            
+            // Force cache invalidation
+            topBalancesCache = null;
+            topBalancesCacheTime = 0;
+            
+            // Update all signs
+            updateAllBalanceSigns();
+            
+            sender.sendMessage(Component.text("Updated " + balanceSigns.size() + " balance leaderboard signs.", NamedTextColor.GREEN));
             return true;
         }
         
@@ -2101,6 +2340,10 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             if (sender.hasPermission("pixelsessentials.debug")) {
                 completions.add("debug");
             }
+            if (sender.hasPermission("pixelsessentials.show")) {
+                completions.add("show");
+                completions.add("updatesigns");
+            }
             
             return filterCompletions(completions, args[0]);
         }
@@ -2109,6 +2352,19 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             if (sender.hasPermission("pixelsessentials.debug")) {
                 completions.add("on");
                 completions.add("off");
+            }
+            return filterCompletions(completions, args[1]);
+        }
+        
+        if (args.length == 2 && args[0].equalsIgnoreCase("show")) {
+            if (sender.hasPermission("pixelsessentials.show")) {
+                // Suggest common placement numbers
+                completions.add("1");
+                completions.add("2");
+                completions.add("3");
+                completions.add("4");
+                completions.add("5");
+                completions.add("10");
             }
             return filterCompletions(completions, args[1]);
         }
@@ -2123,6 +2379,263 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         return completions.stream()
             .filter(s -> s.toLowerCase().startsWith(partial.toLowerCase()))
             .toList();
+    }
+    
+    // ==================================================================================
+    // BALANCE LEADERBOARD SIGN METHODS
+    // ==================================================================================
+    
+    /**
+     * Loads balance leaderboard signs from signs.yml file.
+     * 
+     * <p>File location: plugins/PixelsEssentials/signs.yml</p>
+     */
+    private void loadBalanceSigns() {
+        balanceSigns.clear();
+        
+        File file = new File(getDataFolder(), "signs.yml");
+        if (!file.exists()) return;
+        
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
+        ConfigurationSection signs = yaml.getConfigurationSection("signs");
+        if (signs == null) return;
+        
+        for (String key : signs.getKeys(false)) {
+            ConfigurationSection signSection = signs.getConfigurationSection(key);
+            if (signSection != null) {
+                String worldName = signSection.getString("world");
+                int x = signSection.getInt("x");
+                int y = signSection.getInt("y");
+                int z = signSection.getInt("z");
+                int place = signSection.getInt("place");
+                
+                World world = Bukkit.getWorld(worldName);
+                if (world != null) {
+                    Location loc = new Location(world, x, y, z);
+                    balanceSigns.put(loc, place);
+                }
+            }
+        }
+        
+        getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Loaded " + balanceSigns.size() + " balance leaderboard signs", NamedTextColor.GREEN));
+    }
+    
+    /**
+     * Saves balance leaderboard signs to signs.yml file.
+     * 
+     * <p>File location: plugins/PixelsEssentials/signs.yml</p>
+     */
+    private void saveBalanceSigns() {
+        File file = new File(getDataFolder(), "signs.yml");
+        YamlConfiguration yaml = new YamlConfiguration();
+        
+        int index = 0;
+        for (Map.Entry<Location, Integer> entry : balanceSigns.entrySet()) {
+            Location loc = entry.getKey();
+            int place = entry.getValue();
+            String path = "signs." + index;
+            
+            yaml.set(path + ".world", loc.getWorld().getName());
+            yaml.set(path + ".x", loc.getBlockX());
+            yaml.set(path + ".y", loc.getBlockY());
+            yaml.set(path + ".z", loc.getBlockZ());
+            yaml.set(path + ".place", place);
+            index++;
+        }
+        
+        try {
+            yaml.save(file);
+        } catch (IOException e) {
+            getLogger().severe("Failed to save balance leaderboard signs: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Starts the repeating task to update all balance leaderboard signs.
+     * 
+     * <p>Signs are updated at the interval specified by signUpdateInterval (default 60 seconds).</p>
+     */
+    private void startSignUpdateTask() {
+        // Run initial update after 1 second (give server time to fully load)
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            updateAllBalanceSigns();
+        }, 20L);
+        
+        // Then run periodic updates
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            updateAllBalanceSigns();
+        }, 20L * signUpdateInterval, 20L * signUpdateInterval);
+    }
+    
+    /**
+     * Updates all balance leaderboard signs with current data.
+     */
+    private void updateAllBalanceSigns() {
+        if (debugMode) {
+            getLogger().info("Updating " + balanceSigns.size() + " balance leaderboard signs...");
+        }
+        
+        // Invalidate cache to force fresh data
+        topBalancesCache = null;
+        topBalancesCacheTime = 0;
+        
+        // Create a copy to avoid ConcurrentModificationException if signs are removed
+        for (Map.Entry<Location, Integer> entry : new HashMap<>(balanceSigns).entrySet()) {
+            Location loc = entry.getKey();
+            int place = entry.getValue();
+            updateBalanceSign(loc, place);
+        }
+    }
+    
+    /**
+     * Updates a specific balance leaderboard sign.
+     * 
+     * <p>Sign format:</p>
+     * <pre>
+     * Line 1: "BALANCE" (gold, bold)
+     * Line 2: "#1" (yellow)
+     * Line 3: "PlayerName" (green)
+     * Line 4: "1.23 M" (aqua)
+     * </pre>
+     * 
+     * @param location Sign location
+     * @param place Placement number (1 = richest, etc.)
+     */
+    private void updateBalanceSign(Location location, int place) {
+        Block block = location.getBlock();
+        if (!(block.getState() instanceof Sign)) {
+            // Sign was destroyed, remove from tracking
+            balanceSigns.remove(location);
+            return;
+        }
+        
+        Sign sign = (Sign) block.getState();
+        
+        // Get top balances (cached)
+        List<Map.Entry<UUID, Double>> topBalances = getTopBalancesCached(Math.max(place, 10));
+        
+        if (topBalances.size() >= place) {
+            Map.Entry<UUID, Double> playerEntry = topBalances.get(place - 1);
+            UUID uuid = playerEntry.getKey();
+            double balance = playerEntry.getValue();
+            
+            OfflinePlayer player = Bukkit.getOfflinePlayer(uuid);
+            String playerName = player.getName() != null ? player.getName() : "Unknown";
+            
+            sign.getSide(Side.FRONT).line(0, LegacyComponentSerializer.legacyAmpersand().deserialize("&6&lBALANCE"));
+            sign.getSide(Side.FRONT).line(1, LegacyComponentSerializer.legacyAmpersand().deserialize("&e#" + place));
+            sign.getSide(Side.FRONT).line(2, LegacyComponentSerializer.legacyAmpersand().deserialize("&a" + playerName));
+            sign.getSide(Side.FRONT).line(3, LegacyComponentSerializer.legacyAmpersand().deserialize("&b$" + formatBalanceForSign(balance)));
+        } else {
+            // No player at this position yet
+            sign.getSide(Side.FRONT).line(0, LegacyComponentSerializer.legacyAmpersand().deserialize("&6&lBALANCE"));
+            sign.getSide(Side.FRONT).line(1, LegacyComponentSerializer.legacyAmpersand().deserialize("&e#" + place));
+            sign.getSide(Side.FRONT).line(2, LegacyComponentSerializer.legacyAmpersand().deserialize("&7No Player"));
+            sign.getSide(Side.FRONT).line(3, LegacyComponentSerializer.legacyAmpersand().deserialize("&7$0"));
+        }
+        
+        sign.update();
+    }
+    
+    /**
+     * Gets top player balances with caching.
+     * 
+     * <p>Results are cached for 5 seconds to reduce economy lookups.</p>
+     * 
+     * @param limit Maximum number of players to return
+     * @return List of player UUID and balance entries, sorted by balance descending
+     */
+    private List<Map.Entry<UUID, Double>> getTopBalancesCached(int limit) {
+        long currentTime = System.currentTimeMillis();
+        
+        // Check if cache is still valid
+        if (topBalancesCache != null && (currentTime - topBalancesCacheTime) < BALANCE_CACHE_VALIDITY_MS) {
+            // Return cached results, but only up to the requested limit
+            if (topBalancesCache.size() >= limit) {
+                return topBalancesCache.subList(0, limit);
+            }
+            return topBalancesCache;
+        }
+        
+        // Cache is invalid or doesn't exist, rebuild it
+        topBalancesCache = getTopBalances(limit);
+        topBalancesCacheTime = currentTime;
+        
+        return topBalancesCache;
+    }
+    
+    /**
+     * Gets top player balances from the economy.
+     * 
+     * <p>Iterates through all players who have ever joined the server and
+     * retrieves their balance from Vault economy.</p>
+     * 
+     * @param limit Maximum number of players to return
+     * @return List of player UUID and balance entries, sorted by balance descending
+     */
+    private List<Map.Entry<UUID, Double>> getTopBalances(int limit) {
+        if (economy == null) {
+            if (debugMode) {
+                getLogger().warning("getTopBalances called but economy is null!");
+            }
+            return new ArrayList<>();
+        }
+        
+        Map<UUID, Double> balances = new HashMap<>();
+        
+        // Get all offline players who have ever joined
+        for (OfflinePlayer player : Bukkit.getOfflinePlayers()) {
+            if (player.hasPlayedBefore() || player.isOnline()) {
+                double balance = economy.getBalance(player);
+                if (balance > 0) {
+                    balances.put(player.getUniqueId(), balance);
+                }
+            }
+        }
+        
+        if (debugMode) {
+            getLogger().info("Found " + balances.size() + " players with positive balances");
+        }
+        
+        // Sort by balance descending and limit results
+        return balances.entrySet().stream()
+            .sorted(Map.Entry.<UUID, Double>comparingByValue().reversed())
+            .limit(limit)
+            .collect(java.util.stream.Collectors.toList());
+    }
+    
+    /**
+     * Formats a balance value for display on signs.
+     * 
+     * <p>Format rules:</p>
+     * <ul>
+     *   <li>Under 1 million: Integer with commas (e.g., "12,375")</li>
+     *   <li>Millions: X.XX M (e.g., "35.45 M")</li>
+     *   <li>Billions: X.XX B (e.g., "135.22 B")</li>
+     *   <li>Trillions+: X.XX T (e.g., "1.36 T")</li>
+     * </ul>
+     * 
+     * @param balance The balance to format
+     * @return The formatted balance string
+     */
+    private String formatBalanceForSign(double balance) {
+        if (balance < 0) {
+            return "-" + formatBalanceForSign(-balance);
+        }
+        
+        final double TRILLION = 1_000_000_000_000.0;
+        final double BILLION = 1_000_000_000.0;
+        final double MILLION = 1_000_000.0;
+        
+        if (balance >= TRILLION) {
+            return String.format("%.2f T", balance / TRILLION);
+        } else if (balance >= BILLION) {
+            return String.format("%.2f B", balance / BILLION);
+        } else if (balance >= MILLION) {
+            return String.format("%.2f M", balance / MILLION);
+        } else {
+            return String.format("%,d", (long) balance);
+        }
     }
     
     // ==================================================================================
@@ -2273,6 +2786,14 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      *         <li>Trillions+: X.XX T (e.g., 1.36 T)</li>
      *       </ul>
      *   </li>
+     *   <li><b>%pixelsessentials_helmet_total_durability%</b> - Max durability of helmet (empty if no helmet)</li>
+     *   <li><b>%pixelsessentials_helmet_current_durability%</b> - Current durability of helmet (empty if no helmet)</li>
+     *   <li><b>%pixelsessentials_chestplate_total_durability%</b> - Max durability of chestplate (empty if none)</li>
+     *   <li><b>%pixelsessentials_chestplate_current_durability%</b> - Current durability of chestplate (empty if none)</li>
+     *   <li><b>%pixelsessentials_leggings_total_durability%</b> - Max durability of leggings (empty if none)</li>
+     *   <li><b>%pixelsessentials_leggings_current_durability%</b> - Current durability of leggings (empty if none)</li>
+     *   <li><b>%pixelsessentials_boots_total_durability%</b> - Max durability of boots (empty if none)</li>
+     *   <li><b>%pixelsessentials_boots_current_durability%</b> - Current durability of boots (empty if none)</li>
      * </ul>
      */
     private class PixelsEssentialsExpansion extends PlaceholderExpansion {
@@ -2362,6 +2883,30 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                     double balance = plugin.economy.getBalance(player);
                     return formatBalance(balance);
                     
+                case "helmet_total_durability":
+                    return getArmorTotalDurability(player.getInventory().getHelmet());
+                    
+                case "helmet_current_durability":
+                    return getArmorCurrentDurability(player.getInventory().getHelmet());
+                    
+                case "chestplate_total_durability":
+                    return getArmorTotalDurability(player.getInventory().getChestplate());
+                    
+                case "chestplate_current_durability":
+                    return getArmorCurrentDurability(player.getInventory().getChestplate());
+                    
+                case "leggings_total_durability":
+                    return getArmorTotalDurability(player.getInventory().getLeggings());
+                    
+                case "leggings_current_durability":
+                    return getArmorCurrentDurability(player.getInventory().getLeggings());
+                    
+                case "boots_total_durability":
+                    return getArmorTotalDurability(player.getInventory().getBoots());
+                    
+                case "boots_current_durability":
+                    return getArmorCurrentDurability(player.getInventory().getBoots());
+                    
                 default:
                     return null;
             }
@@ -2400,6 +2945,51 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 // Under 1 million: Integer with commas
                 return String.format("%,d", (long) balance);
             }
+        }
+        
+        /**
+         * Gets the total (max) durability of an armor item.
+         * 
+         * @param item The armor item (may be null)
+         * @return The max durability as a string, or empty string if not applicable
+         */
+        private String getArmorTotalDurability(ItemStack item) {
+            if (item == null || item.getType().isAir()) {
+                return "";
+            }
+            
+            short maxDurability = item.getType().getMaxDurability();
+            if (maxDurability == 0) {
+                return "";
+            }
+            
+            return String.valueOf(maxDurability);
+        }
+        
+        /**
+         * Gets the current remaining durability of an armor item.
+         * 
+         * @param item The armor item (may be null)
+         * @return The current durability as a string, or empty string if not applicable
+         */
+        private String getArmorCurrentDurability(ItemStack item) {
+            if (item == null || item.getType().isAir()) {
+                return "";
+            }
+            
+            short maxDurability = item.getType().getMaxDurability();
+            if (maxDurability == 0) {
+                return "";
+            }
+            
+            if (!(item.getItemMeta() instanceof Damageable)) {
+                return "";
+            }
+            
+            int damage = ((Damageable) item.getItemMeta()).getDamage();
+            int currentDurability = maxDurability - damage;
+            
+            return String.valueOf(currentDurability);
         }
     }
 }
