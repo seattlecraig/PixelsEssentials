@@ -27,3 +27,10 @@ sethome-multiple:
   thearchitect: 50
   ancientgod: 60
   home100: 100
+
+
+# How often balance leaderboard signs update (in seconds)
+sign-update-interval: 60
+
+# Unlock all recipes for players when they join
+unlock-recipes: true
