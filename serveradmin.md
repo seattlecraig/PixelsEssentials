@@ -1,6 +1,6 @@
 # PixelsEssentials Server Administrator Guide
 
-This guide covers installation, configuration, permissions, and administration of PixelsEssentials.
+Complete installation, configuration, permissions, and administration reference for PixelsEssentials.
 
 ---
 
@@ -10,9 +10,11 @@ This guide covers installation, configuration, permissions, and administration o
 2. [Configuration](#configuration)
 3. [Permissions Reference](#permissions-reference)
 4. [Admin Commands](#admin-commands)
-5. [Player Data Management](#player-data-management)
-6. [Integration with ItemsAdder](#integration-with-itemsadder)
-7. [Troubleshooting](#troubleshooting)
+5. [Balance Leaderboard Signs](#balance-leaderboard-signs)
+6. [PlaceholderAPI Integration](#placeholderapi-integration)
+7. [Player Data Management](#player-data-management)
+8. [Integration with ItemsAdder](#integration-with-itemsadder)
+9. [Debug Mode](#debug-mode)
 
 ---
 
@@ -22,7 +24,9 @@ This guide covers installation, configuration, permissions, and administration o
 
 - Paper or Spigot server 1.21+
 - Java 21+
-- (Optional) ItemsAdder plugin for `/gei` command
+- (Optional) Vault + Economy plugin for balance features
+- (Optional) PlaceholderAPI for custom placeholders
+- (Optional) ItemsAdder for `/gei` command
 
 ### Installation Steps
 
@@ -35,15 +39,27 @@ This guide covers installation, configuration, permissions, and administration o
 
 On first run, the plugin creates:
 - `plugins/PixelsEssentials/config.yml` - Main configuration
-- `plugins/PixelsEssentials/playerdata/` - Per-player data storage
+- `plugins/PixelsEssentials/playerdata/` - Per-player YAML data files
+- `plugins/PixelsEssentials/signs.yml` - Balance leaderboard sign locations (when created)
+
+### Console Output
+
+Successful startup shows:
+```
+[PixelsEssentials] Vault economy hooked successfully!
+[PixelsEssentials] PlaceholderAPI expansion registered!
+[PixelsEssentials] Loaded X balance leaderboard signs
+[PixelsEssentials] Balance leaderboard signs enabled (update interval: 60s)
+[PixelsEssentials] Recipe unlock on join enabled
+[PixelsEssentials] PixelsEssentials Started!
+[PixelsEssentials] By SupaFloof Games, LLC
+```
 
 ---
 
 ## Configuration
 
 ### config.yml
-
-The main configuration file controls home limits:
 
 ```yaml
 # Home Limits Configuration
@@ -54,28 +70,23 @@ sethome-multiple:
   mvp: 5
   elite: 10
   admin: 100
+
+# Balance leaderboard sign update interval in seconds
+sign-update-interval: 60
+
+# Unlock all recipes for players when they join
+unlock-recipes: false
 ```
 
 ### How Home Limits Work
 
 1. Define tiers in `sethome-multiple` section
 2. Each tier name becomes a permission: `pixelsessentials.sethome.<tier>`
-3. Players get the highest value from all tiers they have permission for
+3. Players receive the highest value from all tiers they have permission for
 4. Players always get at least 1 home if they have base `pixelsessentials.sethome`
 
-**Example Permission Setup (LuckPerms):**
-
-```
-# Default group gets 1 home
-/lp group default permission set pixelsessentials.sethome true
-/lp group default permission set pixelsessentials.sethome.default true
-
-# VIP group gets 3 homes
-/lp group vip permission set pixelsessentials.sethome.vip true
-
-# Admin group gets 100 homes
-/lp group admin permission set pixelsessentials.sethome.admin true
-```
+**Example:**
+A player with both `pixelsessentials.sethome.vip` (3 homes) and `pixelsessentials.sethome.mvp` (5 homes) gets 5 homes.
 
 ### Reloading Configuration
 
@@ -85,7 +96,10 @@ After editing config.yml:
 /pe reload
 ```
 
-This reloads the configuration and clears the player data cache.
+This:
+- Reloads `config.yml`
+- Reloads `sign-update-interval` and `unlock-recipes` settings
+- Clears player data cache (data reloads from disk on next access)
 
 ---
 
@@ -103,24 +117,24 @@ This reloads the configuration and clears the player data cache.
 
 | Permission | Description | Default |
 |------------|-------------|---------|
-| `pixelsessentials.home` | Use /home command | true |
-| `pixelsessentials.sethome` | Set homes (base permission) | true |
-| `pixelsessentials.sethome.<tier>` | Tier-based home limit | varies |
-| `pixelsessentials.delhome` | Delete homes | true |
-| `pixelsessentials.homeinfo` | View home information | true |
+| `pixelsessentials.home` | Use `/home` to teleport and list | op |
+| `pixelsessentials.sethome` | Base permission to set homes | op |
+| `pixelsessentials.sethome.<tier>` | Tier-based home limit (config-defined) | op |
+| `pixelsessentials.delhome` | Delete homes | op |
+| `pixelsessentials.homeinfo` | View home information and coordinates | op |
 
 ### Back Permissions
 
 | Permission | Description | Default |
 |------------|-------------|---------|
-| `pixelsessentials.back` | Use /back command | op |
-| `pixelsessentials.back.ondeath` | Return to death location | op |
+| `pixelsessentials.back` | Use `/back` to return to last teleport location | op |
+| `pixelsessentials.back.ondeath` | Allow `/back` to return to death location | op |
 
 ### Death Protection Permissions
 
 | Permission | Description | Default |
 |------------|-------------|---------|
-| `pixelsessentials.keepxp` | Keep XP on death | op |
+| `pixelsessentials.keepxp` | Keep experience points on death | op |
 | `pixelsessentials.keepinv` | Keep inventory on death | op |
 | `pixelsessentials.keeppos` | Respawn at death location | op |
 
@@ -129,44 +143,38 @@ This reloads the configuration and clears the player data cache.
 | Permission | Description | Default |
 |------------|-------------|---------|
 | `pixelsessentials.autofeed` | Use autofeed feature | op |
-| `pixelsessentials.giveenchanteditem` | Use /gei command | op |
+| `pixelsessentials.giveenchanteditem` | Use `/gei` command | op |
 | `pixelsessentials.reload` | Reload plugin configuration | op |
 | `pixelsessentials.debug` | Toggle debug mode | op |
+| `pixelsessentials.show` | Create and manage balance leaderboard signs | op |
 
-### Recommended Permission Groups
+### LuckPerms Examples
 
 **Default Players:**
 ```
-pixelsessentials.home
-pixelsessentials.sethome
-pixelsessentials.sethome.default
-pixelsessentials.delhome
-pixelsessentials.homeinfo
+/lp group default permission set pixelsessentials.home true
+/lp group default permission set pixelsessentials.sethome true
+/lp group default permission set pixelsessentials.sethome.default true
+/lp group default permission set pixelsessentials.delhome true
+/lp group default permission set pixelsessentials.homeinfo true
 ```
 
 **VIP Players:**
 ```
-# All default permissions plus:
-pixelsessentials.sethome.vip
-pixelsessentials.repair.hand
-pixelsessentials.back
-pixelsessentials.autofeed
+/lp group vip permission set pixelsessentials.sethome.vip true
+/lp group vip permission set pixelsessentials.repair.hand true
+/lp group vip permission set pixelsessentials.back true
+/lp group vip permission set pixelsessentials.autofeed true
 ```
 
 **Staff/Moderators:**
 ```
-# All VIP permissions plus:
-pixelsessentials.sethome.elite
-pixelsessentials.repair.all
-pixelsessentials.repair.player
-pixelsessentials.back.ondeath
-pixelsessentials.keepinv
-pixelsessentials.keepxp
-```
-
-**Administrators:**
-```
-pixelsessentials.*
+/lp group staff permission set pixelsessentials.sethome.elite true
+/lp group staff permission set pixelsessentials.repair.all true
+/lp group staff permission set pixelsessentials.repair.player true
+/lp group staff permission set pixelsessentials.back.ondeath true
+/lp group staff permission set pixelsessentials.keepinv true
+/lp group staff permission set pixelsessentials.keepxp true
 ```
 
 ---
@@ -183,7 +191,7 @@ or
 /pe
 ```
 
-Shows plugin information and available subcommands.
+Shows plugin version and available subcommands based on your permissions.
 
 ### Reload Configuration
 
@@ -191,9 +199,7 @@ Shows plugin information and available subcommands.
 /pe reload
 ```
 
-- Reloads `config.yml`
-- Clears player data cache (data reloads from disk on next access)
-- Does NOT reload plugin.yml (requires server restart)
+**Permission:** `pixelsessentials.reload`
 
 ### Debug Mode
 
@@ -212,30 +218,33 @@ Check current status:
 /pe debug
 ```
 
-Debug mode logs:
-- Home permission calculations
-- Player data file loading/saving
-- Death protection triggers
-- Autofeed triggers
-- Back command location resolution
+**Permission:** `pixelsessentials.debug`
 
 ### Repair Player Items
-
-Admins can repair another player's entire inventory:
 
 ```
 /repair player <playername>
 ```
 
-This repairs all items in their inventory, armor, and off-hand.
+Repairs all items in the target player's inventory, armor, and off-hand. Both the admin and target player receive confirmation messages.
 
-### Give Enchanted Item (Requires ItemsAdder)
+**Permission:** `pixelsessentials.repair.player`
 
-Give custom items to players:
+### Give Enchanted Item (ItemsAdder Required)
 
 ```
 /gei <player> <ia_item> [count] [name:Name] [lore:Lore] [enchant:level]...
 ```
+
+**Permission:** `pixelsessentials.giveenchanteditem`
+
+**Arguments:**
+- `<player>` - Target player (must be online)
+- `<ia_item>` - ItemsAdder item ID (e.g., `fairyset:fairy_sword`)
+- `[count]` - Number of items (1-64, default 1)
+- `[name:Name]` - Custom display name (underscores become spaces)
+- `[lore:Lore]` - Custom lore line (underscores become spaces)
+- `[enchant:level]` - Enchantment with level (e.g., `sharpness:10`)
 
 **Examples:**
 
@@ -246,21 +255,111 @@ Give custom items to players:
 # Give with count
 /gei Steve fairyset:fairy_sword 5
 
-# Give with custom name (underscores become spaces)
+# Give with custom name (underscores become spaces, & for colors)
 /gei Steve fairyset:fairy_sword 1 name:&6&oLegendary_Blade
 
-# Give with enchantments
+# Give with enchantments (without level defaults to 1)
 /gei Steve fairyset:fairy_sword 1 sharpness:10 unbreaking:5 mending
 
-# Full example
-/gei Steve fairyset:fairy_helmet 1 name:&6&oHelmet_of_Power lore:&7&oA_powerful_helm protection:30 unbreaking:25 mending
+# Full example with all options
+/gei Steve fairyset:fairy_helmet 1 name:&6&oHelm_of_Power lore:&7Ancient_artifact protection:30 unbreaking:25 mending
 ```
 
 **Notes:**
-- Item IDs are in format `namespace:item_id`
-- Underscores in name/lore become spaces
-- Enchantments without `:level` default to level 1
 - Enchantments bypass normal level limits (unsafe enchanting)
+- Enchantments without `:level` default to level 1
+- Custom lore is appended to existing ItemsAdder lore
+- If inventory is full, items drop at the player's feet
+
+---
+
+## Balance Leaderboard Signs
+
+Display top player balances on physical signs that update automatically.
+
+**Requirements:** Vault + Economy plugin
+
+### Creating a Sign
+
+1. Place a sign in the world
+2. Run `/pe show <place>` where `<place>` is the ranking position (1, 2, 3, etc.)
+3. Right-click the sign
+
+The sign converts to a balance leaderboard showing the player at that rank.
+
+**Permission:** `pixelsessentials.show`
+
+### Sign Format
+
+```
+     BALANCE     (gold, bold)
+       #1        (yellow)
+   PlayerName   (green)
+    $1.23 M     (aqua)
+```
+
+### Force Update Signs
+
+```
+/pe updatesigns
+```
+
+Forces an immediate refresh of all balance signs.
+
+### Sign Update Interval
+
+Configure in `config.yml`:
+```yaml
+sign-update-interval: 60
+```
+
+Value is in seconds. Default is 60 seconds.
+
+### Sign Persistence
+
+Signs are saved to `plugins/PixelsEssentials/signs.yml` and persist across restarts. Signs are automatically removed from tracking if the sign block is destroyed.
+
+---
+
+## PlaceholderAPI Integration
+
+When PlaceholderAPI is installed, the following placeholders are available:
+
+### Health Placeholders
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `%pixelsessentials_current_health%` | Current health (1 decimal) | `15.5` |
+| `%pixelsessentials_max_health%` | Maximum health (1 decimal) | `20.0` |
+
+### Balance Placeholder
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `%pixelsessentials_formatted_balance%` | Formatted balance | `12,375` or `35.45 M` |
+
+**Requirements:** Vault + Economy plugin
+
+**Format Rules:**
+- Under 1 million: Integer with commas (e.g., `993,113`)
+- Millions: X.XX M (e.g., `35.45 M`)
+- Billions: X.XX B (e.g., `135.22 B`)
+- Trillions+: X.XX T (e.g., `1.36 T`)
+
+### Armor Durability Placeholders
+
+| Placeholder | Description |
+|-------------|-------------|
+| `%pixelsessentials_helmet_total_durability%` | Max durability of helmet |
+| `%pixelsessentials_helmet_current_durability%` | Current durability of helmet |
+| `%pixelsessentials_chestplate_total_durability%` | Max durability of chestplate |
+| `%pixelsessentials_chestplate_current_durability%` | Current durability of chestplate |
+| `%pixelsessentials_leggings_total_durability%` | Max durability of leggings |
+| `%pixelsessentials_leggings_current_durability%` | Current durability of leggings |
+| `%pixelsessentials_boots_total_durability%` | Max durability of boots |
+| `%pixelsessentials_boots_current_durability%` | Current durability of boots |
+
+Returns empty string if no item is equipped in that slot.
 
 ---
 
@@ -275,7 +374,7 @@ plugins/PixelsEssentials/playerdata/<uuid>.yml
 
 Each player has their own file named by their UUID.
 
-### Data File Format
+### Data File Structure
 
 ```yaml
 # Last teleport location (for /back)
@@ -291,17 +390,17 @@ lastteleportlocation:
 # Last death location (for /back)
 lastdeathlocation:
   world: "uuid-string"
-  world-name: "world"
+  world-name: "world_nether"
   x: 150.0
   y: 32.0
   z: 100.0
   yaw: 0.0
   pitch: 0.0
 
-# Was the last event a death or teleport?
+# Was the last /back-able event a death?
 last-was-death: true
 
-# Logout location
+# Logout location (for analytics)
 logoutlocation:
   world: "uuid-string"
   world-name: "lobby"
@@ -330,120 +429,94 @@ homes:
     yaw: 180.0
     pitch: 0.0
 
-# Autofeed setting
+# Autofeed toggle
 autofeed: true
 ```
 
 ### Managing Player Data
 
 **Reset a player's homes:**
-Delete the `homes:` section from their data file.
+Delete the `homes:` section from their data file (or delete specific home entries).
 
 **Reset all player data:**
-Delete the entire `playerdata/` directory.
+Delete the contents of the `playerdata/` directory.
 
-**Migrate data:**
-Player files use UUIDs, so they work across name changes.
+**Data uses UUIDs:**
+Player files are named by UUID, so data survives name changes.
 
 ### Data Caching
 
-- Player data is cached in memory when accessed
-- Cache is saved to disk on:
-  - Player logout
-  - Server shutdown
-  - After any modification (home set/delete, etc.)
+- Player data is cached in memory when first accessed
+- Cache is saved to disk immediately on modification
+- Cache is saved on player logout
+- All cached data is saved on plugin disable
 - Cache is cleared on `/pe reload`
 
 ---
 
 ## Integration with ItemsAdder
 
-### Dependency Configuration
+### Soft Dependency
 
-PixelsEssentials has a soft dependency on ItemsAdder. The `/gei` command only works when ItemsAdder is installed.
+PixelsEssentials has ItemsAdder as a soft dependency. The `/gei` command only functions when ItemsAdder is installed and loaded.
 
 ### How /gei Works
 
-1. Retrieves item from ItemsAdder registry using `CustomStack.getInstance()`
-2. Gets the Bukkit ItemStack from the custom item
-3. Applies custom name and lore (preserving existing lore)
-4. Applies enchantments using unsafe enchanting (bypasses level limits)
-5. Gives item to player (drops at feet if inventory full)
+1. Retrieves item from ItemsAdder using `CustomStack.getInstance(itemId)`
+2. Obtains the Bukkit ItemStack from the custom item
+3. Applies custom display name if specified (with color code translation)
+4. Appends custom lore if specified (preserves existing lore)
+5. Applies enchantments using `addUnsafeEnchantment()` (bypasses level limits)
+6. Sets item count
+7. Gives item to player (drops at feet if inventory full)
 
-### Compatibility Notes
+### Enchantment Names
 
-- ItemsAdder must be loaded before PixelsEssentials uses the `/gei` command
-- Item IDs must match exactly what's defined in ItemsAdder configs
-- Custom attribute modifiers from ItemsAdder are preserved
-
----
-
-## Troubleshooting
-
-### Homes Not Saving
-
-1. Check file permissions on `plugins/PixelsEssentials/playerdata/`
-2. Enable debug mode: `/pe debug on`
-3. Check console for file save errors
-
-### Home Limits Not Working
-
-1. Enable debug mode: `/pe debug on`
-2. Have the player try `/sethome`
-3. Check console for permission check output
-4. Verify `config.yml` has correct `sethome-multiple` section
-5. Verify player has correct tier permission
-
-### /back Not Working
-
-1. Check player has `pixelsessentials.back` permission
-2. For death location, check `pixelsessentials.back.ondeath`
-3. Enable debug mode to see location resolution
-
-### /gei Command Not Found
-
-1. Verify ItemsAdder is installed and enabled
-2. Check console for any errors on startup
-3. Make sure ItemsAdder loads before PixelsEssentials
-
-### Keep Inventory Not Working
-
-1. Verify player has `pixelsessentials.keepinv` permission
-2. Check priority with other plugins (use EventPriority LOWEST)
-3. Enable debug mode to confirm trigger
-
-### Performance Concerns
-
-- Player data is cached to minimize disk I/O
-- Location tracking only triggers on significant teleports (>1 block)
-- Autofeed only triggers when food level is decreasing
-
-### Common Error Messages
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| "World no longer exists" | Home is in deleted world | Delete the home with `/delhome` |
-| "Unknown ItemsAdder item" | Invalid item ID in /gei | Check ItemsAdder item registry |
-| "You have reached your home limit" | Player at max homes | Delete a home or upgrade permissions |
+Use Minecraft namespace keys for enchantments:
+- `sharpness`, `smite`, `bane_of_arthropods`
+- `protection`, `fire_protection`, `blast_protection`, `projectile_protection`
+- `efficiency`, `silk_touch`, `fortune`, `unbreaking`
+- `mending`, `infinity`, `flame`, `punch`, `power`
+- `respiration`, `aqua_affinity`, `depth_strider`, `frost_walker`
+- `thorns`, `feather_falling`, `soul_speed`, `swift_sneak`
+- And all other vanilla enchantments
 
 ---
 
-## Console Messages
+## Debug Mode
 
-### Startup
-```
-[PixelsEssentials] PixelsEssentials Started!
-[PixelsEssentials] By SupaFloof Games, LLC
-```
+Enable debug mode to see verbose logging:
 
-### Shutdown
 ```
-[PixelsEssentials] PixelsEssentials Shutting Down
+/pe debug on
 ```
 
-### Errors
+### What Debug Mode Logs
+
+- **Player data operations:** File paths for loading/saving
+- **Home permission calculations:** All tier checks and final result
+- **Death protections:** When keepxp/keepinv/keeppos trigger
+- **Respawn handling:** Death location restoration for keeppos
+- **Autofeed triggers:** Hunger level changes and restoration events
+- **Recipe unlocks:** Count of newly discovered recipes on join
+- **Balance sign updates:** Update cycle information
+
+### Example Debug Output
+
 ```
-[SEVERE] Failed to save player data for <uuid>: <error>
+[DEBUG] Loading player data from: plugins/PixelsEssentials/playerdata/550e8400-e29b-41d4-a716-446655440000.yml
+[DEBUG] Found homes section with keys: [home, farm, base]
+[DEBUG] Loaded 3 homes for player 550e8400-e29b-41d4-a716-446655440000
+[DEBUG] Checking sethome permissions for player: Steve
+[DEBUG] Available tiers in config: [default, vip, mvp, elite, admin]
+[DEBUG]   pixelsessentials.sethome.default = true (value: 1)
+[DEBUG]   pixelsessentials.sethome.vip = true (value: 3)
+[DEBUG]   pixelsessentials.sethome.mvp = false (value: 5)
+[DEBUG] Player Steve best match: 'vip' with 3 homes
+[DEBUG] KeepXP: Preserved XP for Steve
+[DEBUG] KeepInv: Preserved inventory for Steve
+[DEBUG] KeepPos: Stored death location for Steve at world (100.5, 64.0, -200.0)
+[DEBUG] Autofeed: Restored hunger for Steve (was at 18, going to 15)
 ```
 
 ---

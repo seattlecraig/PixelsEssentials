@@ -55,64 +55,92 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * PixelsEssentials Plugin
+ * PixelsEssentials Plugin - A comprehensive Minecraft Paper/Spigot essentials plugin
+ * providing core utility commands for server administration and player convenience.
  * 
- * A comprehensive Minecraft Paper/Spigot essentials plugin providing core utility
- * commands for server administration and player convenience.
+ * <h2>Plugin Architecture Overview</h2>
+ * <p>This plugin follows a single-file architecture with the main class implementing
+ * CommandExecutor, TabCompleter, and Listener interfaces. It uses an in-memory cache
+ * for player data with YAML file persistence, and integrates with external plugins
+ * (Vault, PlaceholderAPI, ItemsAdder) for extended functionality.</p>
  * 
- * <p><b>Core Features:</b></p>
+ * <h2>Core Features</h2>
  * <ul>
- *   <li>Item repair system with hand, all inventory, and other player repair options</li>
- *   <li>Home teleportation system with configurable limits per permission tier</li>
- *   <li>Per-player data storage with persistence across server restarts</li>
- *   <li>Last location tracking (before teleport or death)</li>
- *   <li>Logout location tracking</li>
- *   <li>Permission-based home limits with tiered permission groups</li>
- *   <li>Tab completion for all commands and home names</li>
- *   <li>Hot-reload capability for configuration changes</li>
- *   <li>Balance leaderboard signs showing top richest players</li>
- *   <li>PlaceholderAPI integration for health and formatted balance</li>
- *   <li>Automatic recipe unlock on player join (configurable)</li>
+ *   <li><b>Item Repair System:</b> Repairs damageable items in hand, full inventory, or for other players</li>
+ *   <li><b>Home Teleportation:</b> Multi-home system with configurable permission-based limits per tier</li>
+ *   <li><b>Location Tracking:</b> Tracks last teleport location, death location, and logout location</li>
+ *   <li><b>Back Command:</b> Return to previous location before teleport or death (with permission check for death)</li>
+ *   <li><b>Death Management:</b> Optional keep inventory (keepinv), keep XP (keepxp), and keep position (keeppos)</li>
+ *   <li><b>Autofeed System:</b> Automatically restores hunger to full when it drops below threshold</li>
+ *   <li><b>Balance Leaderboard Signs:</b> Physical signs displaying top player balances with periodic updates</li>
+ *   <li><b>Recipe Unlock:</b> Optional automatic recipe discovery on player join</li>
+ *   <li><b>PlaceholderAPI Integration:</b> Custom placeholders for health, balance, and armor durability</li>
+ *   <li><b>ItemsAdder Integration:</b> Give custom items with enchantments, custom names, and lore</li>
+ *   <li><b>Per-Player Data Storage:</b> YAML-based persistence with in-memory caching for performance</li>
+ *   <li><b>Tab Completion:</b> Context-aware suggestions for all commands</li>
+ *   <li><b>Hot-Reload:</b> Configuration reload without server restart</li>
  * </ul>
  * 
- * <p><b>Commands:</b></p>
+ * <h2>Commands Reference</h2>
+ * <table border="1">
+ *   <tr><th>Command</th><th>Description</th><th>Permission</th></tr>
+ *   <tr><td>/repair hand</td><td>Repairs item in main hand</td><td>pixelsessentials.repair.hand</td></tr>
+ *   <tr><td>/repair all</td><td>Repairs all items in inventory, armor, and off-hand</td><td>pixelsessentials.repair.all</td></tr>
+ *   <tr><td>/repair player &lt;name&gt;</td><td>Repairs all items for target player</td><td>pixelsessentials.repair.player</td></tr>
+ *   <tr><td>/home [name]</td><td>Teleport to home or list all homes</td><td>pixelsessentials.home</td></tr>
+ *   <tr><td>/homes</td><td>List all homes (alias for /home)</td><td>pixelsessentials.home</td></tr>
+ *   <tr><td>/sethome [name]</td><td>Set home at current location (default: "home")</td><td>pixelsessentials.sethome + tier</td></tr>
+ *   <tr><td>/delhome &lt;name&gt;</td><td>Delete a home</td><td>pixelsessentials.delhome</td></tr>
+ *   <tr><td>/homeinfo [name]</td><td>Show home count or coordinates of specific home</td><td>pixelsessentials.homeinfo</td></tr>
+ *   <tr><td>/back</td><td>Return to last location before teleport or death</td><td>pixelsessentials.back[.ondeath]</td></tr>
+ *   <tr><td>/autofeed [on|off]</td><td>Toggle automatic hunger restoration</td><td>pixelsessentials.autofeed</td></tr>
+ *   <tr><td>/gei &lt;player&gt; &lt;item&gt; [opts]</td><td>Give ItemsAdder item with enchants/name/lore</td><td>pixelsessentials.giveenchanteditem</td></tr>
+ *   <tr><td>/pe reload</td><td>Reload configuration and clear cache</td><td>pixelsessentials.reload</td></tr>
+ *   <tr><td>/pe debug on|off</td><td>Toggle verbose debug logging to console</td><td>pixelsessentials.debug</td></tr>
+ *   <tr><td>/pe show &lt;place&gt;</td><td>Initiate balance leaderboard sign creation</td><td>pixelsessentials.show</td></tr>
+ *   <tr><td>/pe updatesigns</td><td>Force immediate update of all balance signs</td><td>pixelsessentials.show</td></tr>
+ * </table>
+ * 
+ * <h2>Death-Related Permissions</h2>
  * <ul>
- *   <li><b>/repair hand</b> - Repairs item in main hand (pixelsessentials.repair.hand)</li>
- *   <li><b>/repair all</b> - Repairs all items in inventory and armor (pixelsessentials.repair.all)</li>
- *   <li><b>/repair player &lt;name&gt;</b> - Repairs all items for target player (pixelsessentials.repair.player)</li>
- *   <li><b>/home</b> - Lists all homes (pixelsessentials.home)</li>
- *   <li><b>/home &lt;name&gt;</b> - Teleports to named home (pixelsessentials.home)</li>
- *   <li><b>/homes</b> - Lists all homes (alias for /home)</li>
- *   <li><b>/sethome [name]</b> - Sets a home at current location (pixelsessentials.sethome)</li>
- *   <li><b>/delhome &lt;name&gt;</b> - Deletes a home (pixelsessentials.delhome)</li>
- *   <li><b>/homeinfo &lt;name&gt;</b> - Shows coordinates of a home (pixelsessentials.homeinfo)</li>
- *   <li><b>/pixelsessentials reload</b> - Reloads config (pixelsessentials.reload)</li>
- *   <li><b>/pixelsessentials show &lt;place&gt;</b> - Create balance leaderboard sign (pixelsessentials.show)</li>
+ *   <li><b>pixelsessentials.keepxp:</b> Preserve experience points and levels on death</li>
+ *   <li><b>pixelsessentials.keepinv:</b> Preserve inventory contents on death (no item drops)</li>
+ *   <li><b>pixelsessentials.keeppos:</b> Respawn at death location instead of spawn point</li>
+ *   <li><b>pixelsessentials.back.ondeath:</b> Allow /back to return to death location</li>
  * </ul>
  * 
- * <p><b>PlaceholderAPI Placeholders:</b></p>
+ * <h2>PlaceholderAPI Placeholders</h2>
  * <ul>
- *   <li><b>%pixelsessentials_current_health%</b> - Current health with 1 decimal (e.g., 20.0)</li>
- *   <li><b>%pixelsessentials_max_health%</b> - Max health with 1 decimal (e.g., 20.0)</li>
- *   <li><b>%pixelsessentials_formatted_balance%</b> - Formatted balance (e.g., 12,375 or 35.45 M)</li>
- *   <li><b>%pixelsessentials_helmet_total_durability%</b> - Max durability of helmet</li>
- *   <li><b>%pixelsessentials_helmet_current_durability%</b> - Current durability of helmet</li>
- *   <li><b>%pixelsessentials_chestplate_total_durability%</b> - Max durability of chestplate</li>
- *   <li><b>%pixelsessentials_chestplate_current_durability%</b> - Current durability of chestplate</li>
- *   <li><b>%pixelsessentials_leggings_total_durability%</b> - Max durability of leggings</li>
- *   <li><b>%pixelsessentials_leggings_current_durability%</b> - Current durability of leggings</li>
- *   <li><b>%pixelsessentials_boots_total_durability%</b> - Max durability of boots</li>
- *   <li><b>%pixelsessentials_boots_current_durability%</b> - Current durability of boots</li>
+ *   <li><b>%pixelsessentials_current_health%</b> - Current health with 1 decimal (e.g., 15.5)</li>
+ *   <li><b>%pixelsessentials_max_health%</b> - Maximum health with 1 decimal (e.g., 20.0 or 40.0 with buffs)</li>
+ *   <li><b>%pixelsessentials_formatted_balance%</b> - Economy balance formatted with K/M/B/T suffix</li>
+ *   <li><b>%pixelsessentials_helmet_total_durability%</b> - Max durability of equipped helmet</li>
+ *   <li><b>%pixelsessentials_helmet_current_durability%</b> - Current durability of equipped helmet</li>
+ *   <li><b>%pixelsessentials_chestplate_total_durability%</b> - Max durability of equipped chestplate</li>
+ *   <li><b>%pixelsessentials_chestplate_current_durability%</b> - Current durability of equipped chestplate</li>
+ *   <li><b>%pixelsessentials_leggings_total_durability%</b> - Max durability of equipped leggings</li>
+ *   <li><b>%pixelsessentials_leggings_current_durability%</b> - Current durability of equipped leggings</li>
+ *   <li><b>%pixelsessentials_boots_total_durability%</b> - Max durability of equipped boots</li>
+ *   <li><b>%pixelsessentials_boots_current_durability%</b> - Current durability of equipped boots</li>
  * </ul>
  * 
- * <p><b>Permission Tiers for Home Limits:</b></p>
+ * <h2>Home Limit Configuration</h2>
  * <p>Home limits are determined by permissions in the format pixelsessentials.sethome.&lt;tier&gt;
- * where the tier maps to a number in config.yml. If a player has multiple tier permissions,
- * the highest value is used.</p>
- * 
- * <p><b>Player Data File Format:</b></p>
+ * where the tier maps to a number in config.yml's sethome-multiple section. If a player has
+ * multiple tier permissions, the highest value is used. Players with base sethome permission
+ * but no tier get a minimum of 1 home.</p>
  * <pre>
- * lastlocation:
+ * sethome-multiple:
+ *   default: 1    # pixelsessentials.sethome.default -> 1 home
+ *   vip: 3        # pixelsessentials.sethome.vip -> 3 homes
+ *   mvp: 5        # pixelsessentials.sethome.mvp -> 5 homes
+ *   admin: 100    # pixelsessentials.sethome.admin -> 100 homes
+ * </pre>
+ * 
+ * <h2>Player Data File Format</h2>
+ * <p>Stored at plugins/PixelsEssentials/playerdata/{uuid}.yml</p>
+ * <pre>
+ * lastteleportlocation:
  *   world: &lt;world-uuid&gt;
  *   world-name: world
  *   x: 100.5
@@ -120,6 +148,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *   z: -200.3
  *   yaw: 90.0
  *   pitch: 0.0
+ * lastdeathlocation:
+ *   world: &lt;world-uuid&gt;
+ *   world-name: world_nether
+ *   x: 50.0
+ *   y: 30.0
+ *   z: 100.0
+ *   yaw: 180.0
+ *   pitch: 0.0
+ * last-was-death: false
  * logoutlocation:
  *   world: &lt;world-uuid&gt;
  *   world-name: lobby
@@ -137,58 +174,130 @@ import java.util.concurrent.ConcurrentHashMap;
  *     z: 100.0
  *     yaw: 0.0
  *     pitch: 0.0
+ *   base:
+ *     world: &lt;world-uuid&gt;
+ *     ...
+ * autofeed: true
  * </pre>
  * 
- * <p><b>Technical Details:</b></p>
+ * <h2>External Dependencies</h2>
  * <ul>
- *   <li>Player data stored in YAML files per-player in plugins/PixelsEssentials/playerdata/</li>
- *   <li>File names use player UUIDs for reliable identification</li>
- *   <li>Location data includes world UUID, world name, x, y, z, yaw, and pitch</li>
- *   <li>Tracks lastlocation (before teleport or death) and logoutlocation</li>
- *   <li>Repair checks for Damageable items to avoid processing non-repairable items</li>
- *   <li>Uses Adventure API Components for all player messaging</li>
+ *   <li><b>Vault (optional):</b> Required for balance leaderboard signs and formatted_balance placeholder</li>
+ *   <li><b>PlaceholderAPI (optional):</b> Required for custom placeholder expansion</li>
+ *   <li><b>ItemsAdder (optional):</b> Required for /giveenchanteditem command to give custom items</li>
+ * </ul>
+ * 
+ * <h2>Technical Details</h2>
+ * <ul>
+ *   <li>Player data stored in YAML files per-player using UUID as filename</li>
+ *   <li>In-memory cache with on-demand loading and save-on-modify for performance</li>
+ *   <li>Location data includes world UUID (primary) and world name (fallback/display)</li>
+ *   <li>Separate tracking for lastTeleportLocation vs lastDeathLocation with lastWasDeath flag</li>
+ *   <li>Repair uses Damageable interface check to avoid processing non-repairable items</li>
+ *   <li>Uses Adventure API Components for all player messaging (modern text API)</li>
+ *   <li>Balance signs use ConcurrentHashMap for thread-safety with scheduled updates</li>
+ *   <li>Balance cache with 5-second validity prevents redundant economy lookups</li>
  * </ul>
  * 
  * @author SupaFloof Games, LLC
  * @version 1.0.0
+ * @see <a href="https://playmc.supafloof.com">SupaFloof Minecraft Server</a>
  */
 public class PixelsEssentials extends JavaPlugin implements CommandExecutor, TabCompleter, Listener {
     
+    // ==================================================================================
+    // INSTANCE VARIABLES - PLAYER DATA MANAGEMENT
+    // ==================================================================================
+    
     /**
-     * Directory where player data files are stored.
-     * Location: plugins/PixelsEssentials/playerdata/
-     * Each file is named by player UUID: {uuid}.yml
+     * Directory containing individual player data YAML files.
+     * 
+     * <p><b>Location:</b> plugins/PixelsEssentials/playerdata/</p>
+     * <p><b>File naming:</b> {player-uuid}.yml (e.g., 550e8400-e29b-41d4-a716-446655440000.yml)</p>
+     * 
+     * <p>This directory is created during {@link #onEnable()} if it doesn't exist.
+     * Each player who uses home commands, triggers teleport/death events, or uses
+     * autofeed will have a corresponding YAML file created here.</p>
      */
     private File playerDataFolder;
     
     /**
-     * Cache of player data to avoid constant file reads.
-     * Key: Player UUID
-     * Value: PlayerData object containing homes, lastlocation, logoutlocation
+     * In-memory cache of player data to optimize file I/O performance.
      * 
-     * <p>This cache is populated on demand and saved on changes and player quit
-     * to minimize memory usage while providing fast access during gameplay.</p>
+     * <p><b>Key:</b> Player UUID</p>
+     * <p><b>Value:</b> PlayerData object containing homes, locations, autofeed, and more</p>
+     * 
+     * <p><b>Cache Behavior:</b></p>
+     * <ul>
+     *   <li>Data is loaded on-demand when first needed via {@link #loadPlayerData(UUID)}</li>
+     *   <li>Data is saved to disk immediately on modification for durability</li>
+     *   <li>Cache entries persist for online players to minimize file reads</li>
+     *   <li>Cache is cleared on plugin disable ({@link #onDisable()}) and config reload</li>
+     * </ul>
+     * 
+     * <p>This cache pattern significantly reduces disk I/O during gameplay while
+     * ensuring data persistence through immediate saves and quit event handling.</p>
      */
     private Map<UUID, PlayerData> playerDataCache = new HashMap<>();
     
     /**
-     * Debug mode flag. When true, verbose logging is output to console.
-     * Toggled via /pe debug on|off command.
+     * Debug mode flag controlling verbose console logging.
+     * 
+     * <p><b>Toggle:</b> /pe debug on|off (requires pixelsessentials.debug permission)</p>
+     * 
+     * <p>When enabled, outputs detailed information about:</p>
+     * <ul>
+     *   <li>Player data loading/saving operations with file paths</li>
+     *   <li>Permission checks for home limits showing all tier evaluations</li>
+     *   <li>Death/respawn handling for keepxp/keepinv/keeppos features</li>
+     *   <li>Autofeed trigger events with hunger level details</li>
+     *   <li>Balance sign update operations</li>
+     *   <li>Recipe unlock counts on player join</li>
+     * </ul>
+     * 
+     * <p>This flag is not persisted to config and resets to false on plugin reload/restart.</p>
      */
     private boolean debugMode = false;
     
     /**
-     * Tracks death locations for players with keeppos permission.
-     * Key: Player UUID
-     * Value: Death location to respawn at
+     * Temporary storage for death locations pending respawn teleportation (keeppos feature).
      * 
-     * <p>Entries are added on death and removed after respawn teleport.</p>
+     * <p><b>Key:</b> Player UUID</p>
+     * <p><b>Value:</b> Cloned Location where the player died</p>
+     * 
+     * <p><b>Lifecycle:</b></p>
+     * <ol>
+     *   <li>Entry added in {@link #onPlayerDeath} if player has pixelsessentials.keeppos permission</li>
+     *   <li>Location is cloned to prevent reference issues from the original event</li>
+     *   <li>Entry consumed (removed) in {@link #onPlayerRespawn} to set respawn location</li>
+     *   <li>Entry cleaned up on player quit if they disconnect before respawning</li>
+     * </ol>
+     * 
+     * <p>This map bridges the death and respawn events which occur at different times
+     * and prevents the normal respawn location determination (bed/spawn point).</p>
      */
     private Map<UUID, Location> deathLocations = new HashMap<>();
     
+    // ==================================================================================
+    // INSTANCE VARIABLES - EXTERNAL INTEGRATIONS
+    // ==================================================================================
+    
     /**
-     * Vault economy provider for balance placeholders.
-     * May be null if Vault or an economy plugin is not installed.
+     * Vault economy service provider for balance-related features.
+     * 
+     * <p><b>Initialized:</b> During {@link #onEnable()} if Vault plugin is present and registered</p>
+     * <p><b>Value:</b> null if Vault is not installed or no economy plugin is registered</p>
+     * 
+     * <p><b>Used by:</b></p>
+     * <ul>
+     *   <li>Balance leaderboard signs - retrieving and ranking player balances</li>
+     *   <li>PlaceholderAPI expansion - %pixelsessentials_formatted_balance% placeholder</li>
+     *   <li>{@link #getTopBalances(int)} - querying all player balances for rankings</li>
+     * </ul>
+     * 
+     * <p>The economy instance is obtained via Bukkit's RegisteredServiceProvider pattern.
+     * A null check should always be performed before any economy operations since Vault
+     * is an optional soft dependency.</p>
      */
     private Economy economy = null;
     
@@ -197,61 +306,170 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     // ==================================================================================
     
     /**
-     * Balance leaderboard sign locations and their placement numbers.
-     * Key: Block location of the sign
-     * Value: Placement number (1 = richest, 2 = second richest, etc.)
-     * ConcurrentHashMap for thread-safety during sign updates.
+     * Registry of balance leaderboard sign locations and their ranking positions.
+     * 
+     * <p><b>Key:</b> Block location of the sign (world + x,y,z coordinates)</p>
+     * <p><b>Value:</b> Placement number (1 = richest player, 2 = second richest, etc.)</p>
+     * 
+     * <p><b>Persistence:</b> Saved to plugins/PixelsEssentials/signs.yml on shutdown and creation</p>
+     * 
+     * <p>Uses ConcurrentHashMap for thread-safety since sign updates run on a
+     * scheduled async task timer that may interact with player commands concurrently.</p>
+     * 
+     * <p><b>Sign Lifecycle:</b></p>
+     * <ol>
+     *   <li>Created via /pe show &lt;place&gt; followed by right-click on a sign</li>
+     *   <li>Updated periodically by {@link #startSignUpdateTask()} at configurable interval</li>
+     *   <li>Automatically removed from tracking if sign block is destroyed/replaced</li>
+     *   <li>Persisted to signs.yml on plugin disable and after each sign creation</li>
+     * </ol>
      */
     private Map<Location, Integer> balanceSigns = new ConcurrentHashMap<>();
     
     /**
-     * Pending sign creation - waiting for player to right-click a sign.
-     * Key: Player UUID who executed /pe show command
-     * Value: Placement number to assign to the next sign they right-click
+     * Pending balance sign creation requests awaiting player interaction.
+     * 
+     * <p><b>Key:</b> Player UUID who executed /pe show &lt;place&gt; command</p>
+     * <p><b>Value:</b> Placement number (1-N) to assign to the next right-clicked sign</p>
+     * 
+     * <p><b>Workflow:</b></p>
+     * <ol>
+     *   <li>Admin runs /pe show 1 (or any placement number)</li>
+     *   <li>Entry added: {admin-uuid} -> 1</li>
+     *   <li>Admin receives prompt to right-click a sign</li>
+     *   <li>Admin right-clicks any sign block</li>
+     *   <li>{@link #onPlayerInteract} converts the sign to a balance leaderboard</li>
+     *   <li>Entry removed from this map, sign added to {@link #balanceSigns}</li>
+     * </ol>
+     * 
+     * <p>Entries are automatically cleaned up on player quit via {@link #onPlayerQuit}
+     * to prevent stale pending requests affecting future sessions.</p>
      */
     private Map<UUID, Integer> pendingBalanceSigns = new ConcurrentHashMap<>();
     
     /**
-     * Sign update interval in seconds (how often signs refresh with latest data).
-     * Default: 60 seconds
+     * Interval in seconds between automatic balance leaderboard sign updates.
+     * 
+     * <p><b>Config key:</b> sign-update-interval</p>
+     * <p><b>Default:</b> 60 seconds</p>
+     * <p><b>Reloaded:</b> On /pe reload command</p>
+     * 
+     * <p>Lower values provide more current balance data but increase server load due to
+     * economy lookups for all players who have ever joined. The default of 60 seconds
+     * balances data freshness with performance. Consider higher values (120-300) for
+     * servers with many unique players.</p>
+     * 
+     * <p>Note: Manual updates can be forced at any time via /pe updatesigns command.</p>
      */
     private int signUpdateInterval = 60;
     
+    // ==================================================================================
+    // INSTANCE VARIABLES - CONFIGURATION OPTIONS
+    // ==================================================================================
+    
     /**
-     * Whether to unlock all recipes for players when they join.
-     * Configured via unlock-recipes in config.yml. Default: false
+     * Flag controlling automatic recipe discovery for players on join.
+     * 
+     * <p><b>Config key:</b> unlock-recipes</p>
+     * <p><b>Default:</b> false (disabled)</p>
+     * <p><b>Reloaded:</b> On /pe reload command</p>
+     * 
+     * <p>When enabled, all registered recipes (vanilla and custom from other plugins)
+     * are discovered for players when they join the server. This is useful for servers
+     * that want players to have immediate full recipe book access without needing to
+     * discover recipes through normal gameplay progression.</p>
+     * 
+     * <p><b>Note:</b> Only recipes implementing {@link org.bukkit.Keyed} can be discovered.
+     * The count of newly unlocked recipes is logged in debug mode.</p>
      */
     private boolean unlockRecipesOnJoin = false;
     
     /**
-     * Cache of top balances to avoid repeated economy lookups.
-     * Key: Placement (1-indexed)
-     * Value: Entry containing player UUID and balance
+     * Cached list of top player balances to minimize expensive economy lookups.
+     * 
+     * <p><b>Structure:</b> List of Map.Entry&lt;UUID, Double&gt; sorted by balance descending</p>
+     * <p><b>Index:</b> 0 = richest player, 1 = second richest, etc.</p>
+     * 
+     * <p>This cache prevents repeated expensive economy lookups when multiple
+     * balance signs need updating simultaneously. The cache is shared across all sign
+     * updates that occur within the {@link #BALANCE_CACHE_VALIDITY_MS} window.</p>
+     * 
+     * <p><b>Invalidation:</b></p>
+     * <ul>
+     *   <li>Automatically after 5 seconds (time-based expiry)</li>
+     *   <li>Manually via /pe updatesigns command (sets to null)</li>
+     *   <li>On each periodic update cycle (ensures fresh data)</li>
+     * </ul>
+     * 
+     * @see #topBalancesCacheTime
+     * @see #BALANCE_CACHE_VALIDITY_MS
+     * @see #getTopBalancesCached(int)
      */
     private List<Map.Entry<UUID, Double>> topBalancesCache = null;
     
     /**
-     * Timestamp of when the top balances cache was last updated.
+     * Timestamp (System.currentTimeMillis) when the top balances cache was last populated.
+     * 
+     * <p>Used in conjunction with {@link #BALANCE_CACHE_VALIDITY_MS} to determine
+     * if the cached balance data is still fresh enough to use. When the current time
+     * minus this timestamp exceeds the validity period, the cache is considered stale
+     * and will be refreshed on the next access.</p>
+     * 
+     * <p>Set to 0 when cache is explicitly invalidated via /pe updatesigns.</p>
+     * 
+     * @see #topBalancesCache
+     * @see #getTopBalancesCached(int)
      */
     private long topBalancesCacheTime = 0;
     
     /**
-     * How long the top balances cache remains valid (in milliseconds).
-     * Default: 5 seconds
+     * Duration in milliseconds that cached balance data remains valid before refresh.
+     * 
+     * <p><b>Value:</b> 5000ms (5 seconds)</p>
+     * 
+     * <p>This short validity ensures balance sign data is reasonably current while
+     * preventing redundant economy lookups when multiple signs update in quick succession
+     * (which happens every {@link #signUpdateInterval} seconds when {@link #updateAllBalanceSigns()}
+     * iterates through all registered signs).</p>
+     * 
+     * <p>The 5-second window is intentionally short because balance changes (trades, shop
+     * purchases, job payments) can happen frequently on active servers.</p>
      */
     private static final long BALANCE_CACHE_VALIDITY_MS = 5000;
     
+    // ==================================================================================
+    // PLUGIN LIFECYCLE METHODS
+    // ==================================================================================
+    
     /**
-     * Plugin initialization method called by Bukkit when the plugin is enabled.
+     * Plugin initialization method called by Bukkit when the server enables this plugin.
      * 
-     * <p><b>Initialization Steps:</b></p>
+     * <p><b>Initialization Sequence:</b></p>
      * <ol>
-     *   <li>Create the playerdata directory if it doesn't exist</li>
-     *   <li>Save default config.yml if it doesn't exist</li>
-     *   <li>Register command executors and tab completers</li>
-     *   <li>Register event listeners for location tracking</li>
-     *   <li>Send colored startup messages to console</li>
+     *   <li>Create playerdata directory structure for per-player YAML files</li>
+     *   <li>Save default config.yml from JAR resources if not present</li>
+     *   <li>Register all command executors and tab completers for each command</li>
+     *   <li>Register this class as event listener (implements Listener interface)</li>
+     *   <li>Hook into Vault economy service if Vault plugin is present</li>
+     *   <li>Register PlaceholderAPI expansion if PlaceholderAPI is present</li>
+     *   <li>Load balance leaderboard signs from signs.yml persistent storage</li>
+     *   <li>Start periodic sign update scheduled task (if economy available)</li>
+     *   <li>Load configuration options (unlock-recipes, sign-update-interval)</li>
+     *   <li>Output colored startup messages to console</li>
      * </ol>
+     * 
+     * <p><b>External Plugin Integration (all optional soft dependencies):</b></p>
+     * <ul>
+     *   <li><b>Vault:</b> Enables economy features - balance signs and formatted_balance placeholder</li>
+     *   <li><b>PlaceholderAPI:</b> Enables custom placeholders for health, balance, and durability</li>
+     *   <li><b>ItemsAdder:</b> Enables /giveenchanteditem command for custom items (checked at runtime)</li>
+     * </ul>
+     * 
+     * <p><b>Commands Registered:</b> repair, home, sethome, delhome, homeinfo, pixelsessentials,
+     * autofeed, back, giveenchanteditem</p>
+     * 
+     * <p><b>Events Handled:</b> PlayerTeleportEvent, PlayerDeathEvent, PlayerRespawnEvent,
+     * FoodLevelChangeEvent, PlayerQuitEvent, PlayerInteractEvent, PlayerJoinEvent</p>
      */
     @Override
     public void onEnable() {
@@ -341,9 +559,24 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     }
     
     /**
-     * Plugin shutdown method called by Bukkit when the plugin is disabled.
+     * Plugin shutdown method called by Bukkit when the server disables this plugin.
      * 
-     * <p>Saves all cached player data and clears the cache to prevent memory leaks.</p>
+     * <p><b>Shutdown Sequence:</b></p>
+     * <ol>
+     *   <li>Iterate through all cached player data and save to disk files</li>
+     *   <li>Clear player data cache to release memory</li>
+     *   <li>Clear death locations map (any pending keeppos respawns are lost)</li>
+     *   <li>Save balance leaderboard signs to signs.yml for persistence</li>
+     *   <li>Clear balance sign maps (balanceSigns and pendingBalanceSigns)</li>
+     *   <li>Output shutdown message to console in red color</li>
+     * </ol>
+     * 
+     * <p>This method ensures no data loss by persisting all in-memory data
+     * before the plugin is fully disabled. Any scheduled tasks (like sign updates)
+     * are automatically cancelled by Bukkit when the plugin is disabled.</p>
+     * 
+     * <p><b>Note:</b> Players who die with keeppos and quit before respawning will
+     * lose their stored death location since deathLocations is not persisted.</p>
      */
     @Override
     public void onDisable() {
@@ -368,16 +601,33 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     }
     
     // ==================================================================================
-    // EVENT HANDLERS - LOCATION TRACKING
+    // EVENT HANDLERS - LOCATION TRACKING AND PLAYER FEATURES
     // ==================================================================================
     
     /**
-     * Handles player teleport events to track last location.
+     * Handles player teleport events to track the player's pre-teleport location.
      * 
-     * <p>Saves the player's location before teleportation as their lastlocation.
-     * This allows players to return to where they were before teleporting.</p>
+     * <p><b>Event Priority:</b> MONITOR - Runs after all other handlers, only if event not cancelled</p>
+     * <p><b>Ignore Cancelled:</b> true - Does not process if another plugin cancelled the teleport</p>
      * 
-     * @param event The PlayerTeleportEvent
+     * <p><b>Purpose:</b> Saves the player's location BEFORE teleportation occurs, enabling
+     * the /back command to return them to their previous location. This tracking is distinct
+     * from death location tracking.</p>
+     * 
+     * <p><b>Filtering:</b> Minor movements (distance &lt; 1 block) are ignored to prevent
+     * recording trivial position changes from other plugins, vehicle mounting, minecart
+     * movement, or game mechanics that cause micro-teleports.</p>
+     * 
+     * <p><b>Data Flow:</b></p>
+     * <ol>
+     *   <li>Player initiates teleport (home command, spawn, plugin teleport, etc.)</li>
+     *   <li>This handler captures the "from" location before the teleport completes</li>
+     *   <li>Location saved to PlayerData.lastTeleportLocation via {@link #setLastTeleportLocation}</li>
+     *   <li>PlayerData.lastWasDeath flag set to false (this was a teleport, not death)</li>
+     *   <li>Player can now use /back to return to this saved location</li>
+     * </ol>
+     * 
+     * @param event The PlayerTeleportEvent containing from/to locations and teleport cause
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
@@ -2050,33 +2300,37 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     // ==================================================================================
     
     /**
-     * Handles the /giveenchanteditem command.
+     * Handles the /giveenchanteditem (alias: /gei) command for giving ItemsAdder custom items.
      * 
-     * <p>Gives an ItemsAdder custom item with optional enchantments to a player.</p>
-     * 
-     * <p><b>Usage:</b> /giveenchanteditem &lt;player&gt; &lt;ia_item&gt; [enchant:level]...</p>
-     * <p><b>Example:</b> /giveenchanteditem Craig sapphire_knight_set:sapphire_sword sharpness:5 unbreaking:3</p>
-     * 
+     * <p><b>Requires:</b> ItemsAdder plugin to be installed and loaded</p>
      * <p><b>Permission:</b> pixelsessentials.giveenchanteditem</p>
      * 
-     * @param sender The command sender
-     * @param args The command arguments
-     * @return true if command was handled
-     */
-    /**
-     * Handles the /giveenchanteditem (gei) command.
-     * 
-     * <p>Gives an ItemsAdder custom item with optional count, custom name, lore, and enchantments.</p>
-     * 
      * <p><b>Usage:</b> /gei &lt;player&gt; &lt;ia_item&gt; [count] [name:Custom_Name] [lore:Custom_Lore] [enchant:level]...</p>
-     * <p><b>Example:</b> /gei Craig fairyset:fairy_helmet 1 name:&amp;6&amp;oAzathoth's_Helmet lore:&amp;7&amp;oThe_Helmet protection:30 mending aqua_affinity</p>
      * 
-     * <p>Underscores in name: and lore: values are converted to spaces.</p>
-     * <p>Enchantments without a level default to level 1 (e.g., "aqua_affinity" = "aqua_affinity:1").</p>
+     * <p><b>Arguments (flexible order after item):</b></p>
+     * <ul>
+     *   <li><b>player:</b> Target player name (must be online)</li>
+     *   <li><b>ia_item:</b> ItemsAdder item ID (e.g., "fairyset:fairy_helmet")</li>
+     *   <li><b>count:</b> Number of items (1-64, default 1)</li>
+     *   <li><b>name:Name:</b> Custom display name (underscores become spaces, supports &amp; color codes)</li>
+     *   <li><b>lore:Lore:</b> Custom lore line (underscores become spaces, supports &amp; color codes)</li>
+     *   <li><b>enchant:level:</b> Enchantment with level (e.g., "protection:30", "mending")</li>
+     * </ul>
      * 
-     * @param sender The command sender
+     * <p><b>Enchantment Notes:</b></p>
+     * <ul>
+     *   <li>Enchantments without a :level suffix default to level 1</li>
+     *   <li>Uses addUnsafeEnchantment() to allow any level on any item</li>
+     *   <li>Enchantment names use Minecraft namespace keys (e.g., "sharpness", "fire_protection")</li>
+     * </ul>
+     * 
+     * <p><b>Example:</b> /gei Craig fairyset:fairy_helmet 1 name:&amp;6&amp;oAzathoth's_Helmet protection:30 mending aqua_affinity</p>
+     * 
+     * <p>If target inventory is full, items are dropped at the player's feet.</p>
+     * 
+     * @param sender The command sender (player or console)
      * @param args The command arguments
-     * @return true if command was handled
+     * @return true always (command was handled)
      */
     private boolean handleGiveEnchantedItemCommand(CommandSender sender, String[] args) {
         // Check permission
@@ -2639,73 +2893,169 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     }
     
     // ==================================================================================
-    // INTERNAL CLASSES
+    // INTERNAL DATA CLASSES
     // ==================================================================================
     
     /**
-     * Internal class to store all data for a player.
+     * Internal data class storing all persistent data for a single player.
      * 
-     * <p>Contains homes, last locations, and logout location.</p>
+     * <p>This class serves as the in-memory representation of a player's YAML data file.
+     * Instances are cached in {@link #playerDataCache} and persisted to disk via
+     * {@link #savePlayerData(UUID)}.</p>
+     * 
+     * <p><b>Data Stored:</b></p>
+     * <ul>
+     *   <li><b>homes:</b> Map of home names to locations (lowercase keys)</li>
+     *   <li><b>lastTeleportLocation:</b> Position before most recent teleport</li>
+     *   <li><b>lastDeathLocation:</b> Position of most recent death</li>
+     *   <li><b>lastWasDeath:</b> Flag indicating if /back should use death or teleport location</li>
+     *   <li><b>logoutLocation:</b> Position when player quit (for analytics/spawn-on-join)</li>
+     *   <li><b>autofeedEnabled:</b> Per-player toggle for automatic hunger restoration</li>
+     * </ul>
+     * 
+     * <p><b>YAML File Mapping:</b></p>
+     * <pre>
+     * homes:              -> homes Map
+     * lastteleportlocation: -> lastTeleportLocation
+     * lastdeathlocation:    -> lastDeathLocation
+     * last-was-death:       -> lastWasDeath
+     * logoutlocation:       -> logoutLocation
+     * autofeed:             -> autofeedEnabled
+     * </pre>
      */
     private static class PlayerData {
-        /** Map of home name (lowercase) to location data */
+        /**
+         * Map of home name (lowercase) to location data.
+         * Keys are always lowercase for case-insensitive matching.
+         * Empty map by default, never null.
+         */
         Map<String, LocationData> homes = new HashMap<>();
         
-        /** Last location before teleport (may be null) */
+        /**
+         * Location before the player's most recent teleport.
+         * Set by {@link #onPlayerTeleport} for /back command functionality.
+         * May be null if player hasn't teleported yet.
+         */
         LocationData lastTeleportLocation;
         
-        /** Last death location (may be null) */
+        /**
+         * Location where the player most recently died.
+         * Set by {@link #onPlayerDeath} for /back command functionality.
+         * May be null if player hasn't died yet.
+         */
         LocationData lastDeathLocation;
         
-        /** Whether the most recent event was a death (true) or teleport (false) */
+        /**
+         * Flag indicating whether the most recent /back-able event was a death.
+         * 
+         * <p>When true, /back will attempt to use lastDeathLocation (requires ondeath permission).
+         * When false, /back will use lastTeleportLocation.</p>
+         * 
+         * <p>This flag is set to true in {@link #setLastDeathLocation} and
+         * false in {@link #setLastTeleportLocation}.</p>
+         */
         boolean lastWasDeath = false;
         
-        /** Location when player logged out (may be null) */
+        /**
+         * Location where the player was when they logged out.
+         * Set by {@link #onPlayerQuit} for future features or analytics.
+         * May be null if player data was created before first quit.
+         */
         LocationData logoutLocation;
         
-        /** Whether autofeed is enabled for this player (default true) */
+        /**
+         * Whether automatic hunger restoration is enabled for this player.
+         * 
+         * <p>Default: true (enabled for new players)</p>
+         * <p>Toggled via /autofeed on|off command</p>
+         * <p>Requires pixelsessentials.autofeed permission to actually trigger</p>
+         */
         boolean autofeedEnabled = true;
     }
     
     /**
-     * Internal class to store location data with world UUID and name.
+     * Immutable data class storing a serializable location with world identification.
      * 
-     * <p>Contains all information needed to teleport a player to a saved location,
-     * including both world UUID (for reliable identification) and world name
-     * (for human-readable display and fallback).</p>
+     * <p>This class contains all information needed to teleport a player to a saved location.
+     * It stores both world UUID (primary, reliable across renames) and world name
+     * (fallback, human-readable for display/debugging).</p>
+     * 
+     * <p><b>World Resolution:</b> When converting to a Bukkit Location via {@link #toLocation()},
+     * the world is first looked up by UUID. If not found (world deleted/recreated), falls back
+     * to lookup by name. Returns null if neither succeeds.</p>
+     * 
+     * <p><b>YAML Storage Format:</b></p>
+     * <pre>
+     * somepath:
+     *   world: "550e8400-e29b-41d4-a716-446655440000"
+     *   world-name: "world"
+     *   x: 100.5
+     *   y: 64.0
+     *   z: -200.3
+     *   yaw: 90.0
+     *   pitch: 0.0
+     * </pre>
+     * 
+     * <p><b>Immutability:</b> All fields are final and set at construction time.
+     * This ensures thread-safety and prevents accidental modification of saved locations.</p>
      */
     private static class LocationData {
-        /** The UUID of the world as a string */
+        /**
+         * The UUID of the world as a string.
+         * Primary identifier used for world resolution in {@link #toLocation()}.
+         * More reliable than world name since UUIDs persist across world renames.
+         */
         final String worldUuid;
         
-        /** The name of the world (for display and fallback) */
+        /**
+         * The human-readable name of the world.
+         * Used for display purposes and as fallback if UUID lookup fails.
+         * Stored for debugging and when world is recreated with new UUID.
+         */
         final String worldName;
         
-        /** X coordinate */
+        /**
+         * X coordinate in the world (east-west position).
+         * Stored as double for sub-block precision.
+         */
         final double x;
         
-        /** Y coordinate */
+        /**
+         * Y coordinate in the world (vertical position/height).
+         * Stored as double for sub-block precision.
+         * Valid range typically 0-320 in modern Minecraft.
+         */
         final double y;
         
-        /** Z coordinate */
+        /**
+         * Z coordinate in the world (north-south position).
+         * Stored as double for sub-block precision.
+         */
         final double z;
         
-        /** Yaw (horizontal rotation) */
+        /**
+         * Yaw (horizontal rotation) in degrees.
+         * 0 = south, 90 = west, 180 = north, 270 = east.
+         * Range: -180 to 180 or 0 to 360 depending on source.
+         */
         final float yaw;
         
-        /** Pitch (vertical rotation) */
+        /**
+         * Pitch (vertical rotation/look angle) in degrees.
+         * 0 = horizontal, -90 = straight up, 90 = straight down.
+         */
         final float pitch;
         
         /**
-         * Constructs a new LocationData object.
+         * Constructs a new immutable LocationData instance.
          * 
-         * @param worldUuid World UUID as string
-         * @param worldName World name
-         * @param x X coordinate
-         * @param y Y coordinate
-         * @param z Z coordinate
-         * @param yaw Horizontal rotation
-         * @param pitch Vertical rotation
+         * @param worldUuid World UUID as string (from World.getUID().toString())
+         * @param worldName World name (from World.getName())
+         * @param x X coordinate (east-west)
+         * @param y Y coordinate (height)
+         * @param z Z coordinate (north-south)
+         * @param yaw Horizontal rotation in degrees
+         * @param pitch Vertical rotation in degrees
          */
         LocationData(String worldUuid, String worldName, double x, double y, double z, float yaw, float pitch) {
             this.worldUuid = worldUuid;

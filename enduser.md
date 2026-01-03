@@ -1,6 +1,6 @@
 # PixelsEssentials End User Guide
 
-Welcome to PixelsEssentials! This guide will help you understand all the features available to you as a player.
+Welcome to PixelsEssentials! This guide covers all the features available to you as a player.
 
 ---
 
@@ -11,6 +11,7 @@ Welcome to PixelsEssentials! This guide will help you understand all the feature
 3. [Repair Commands](#repair-commands)
 4. [Autofeed](#autofeed)
 5. [Death Protections](#death-protections)
+6. [Command Quick Reference](#command-quick-reference)
 
 ---
 
@@ -20,34 +21,48 @@ The home system lets you save locations and teleport back to them instantly.
 
 ### Setting a Home
 
-To save your current location as a home:
+Stand where you want your home and type:
 
 ```
 /sethome
 ```
 
-This creates a home called "home". You can also give it a custom name:
+This creates a home called "home". To give it a custom name:
 
 ```
-/sethome mybase
+/sethome base
 /sethome farm
-/sethome mineshaft
+/sethome nether_hub
 ```
 
-**Rules for home names:**
+**Home Name Rules:**
 - Letters, numbers, underscores, and dashes only
 - Maximum 32 characters
 - Names are case-insensitive ("Farm" and "farm" are the same)
 
+### Updating a Home
+
+To move an existing home to your current location, use `/sethome` with the same name:
+
+```
+/sethome farm
+```
+
+If "farm" already exists, it updates to your new location without counting against your home limit.
+
 ### Teleporting Home
 
-To teleport to a home:
+To teleport to a specific home:
 
 ```
-/home mybase
+/home farm
 ```
 
-Or just `/home` to see your list of homes first.
+To teleport to your default home:
+
+```
+/home home
+```
 
 ### Listing Your Homes
 
@@ -56,24 +71,26 @@ To see all your saved homes:
 ```
 /home
 ```
+
 or
+
 ```
 /homes
 ```
 
-This shows your homes and how many you've used out of your maximum allowed.
+This displays your homes in a comma-separated list along with your current usage (e.g., "3/5" meaning 3 homes out of 5 maximum).
 
 ### Getting Home Information
 
 To see the coordinates of a specific home:
 
 ```
-/homeinfo mybase
+/homeinfo farm
 ```
 
 This shows the world name and X, Y, Z coordinates.
 
-To see a summary of your home usage:
+To see a summary of your home count:
 
 ```
 /homeinfo
@@ -84,24 +101,26 @@ To see a summary of your home usage:
 To remove a saved home:
 
 ```
-/delhome mybase
+/delhome farm
 ```
 
 ### Home Limits
 
-You have a maximum number of homes you can set. This limit is determined by your rank or permissions on the server. When you set a home, you'll see your current usage like "(3/5)" meaning you have 3 homes out of a maximum of 5.
+You have a maximum number of homes based on your permissions. When you set a home, you'll see your usage displayed like "(3/5)".
 
-If you've reached your limit, you must delete an existing home before creating a new one. However, you can always update an existing home by using `/sethome` with the same name again.
+If you've reached your limit:
+- Delete an existing home with `/delhome`
+- Or update an existing home by using `/sethome` with the same name
 
 ---
 
 ## Back Command
 
-The `/back` command teleports you to your previous location.
+The `/back` command returns you to your previous location.
 
 ### Returning After Teleporting
 
-If you teleport somewhere (using `/home`, a warp, etc.) and want to return:
+After any teleport (using `/home`, warps, etc.):
 
 ```
 /back
@@ -117,13 +136,21 @@ If you die and want to return to your death location:
 /back
 ```
 
-**Note:** Returning to your death location may require additional permissions. If you don't have permission, `/back` will take you to your last teleport location instead.
+**Note:** Returning to death locations requires the `pixelsessentials.back.ondeath` permission. Without it, `/back` will take you to your last teleport location instead.
+
+### How It Works
+
+The plugin tracks two separate locations:
+- **Last Teleport Location** - Where you were before your most recent teleport
+- **Last Death Location** - Where you died most recently
+
+The `/back` command uses whichever event happened most recently, subject to your permissions.
 
 ---
 
 ## Repair Commands
 
-The repair system lets you fix damaged tools, weapons, and armor.
+Fix damaged tools, weapons, and armor instantly.
 
 ### Repairing Your Held Item
 
@@ -133,22 +160,25 @@ To repair the item in your main hand:
 /repair hand
 ```
 
-The item must be damageable (tools, weapons, armor). Items that can't take damage (like blocks or food) cannot be repaired.
+Requirements:
+- You must be holding an item
+- The item must be damageable (tools, weapons, armor)
+- Items at full durability show a message instead
 
 ### Repairing Everything
 
-To repair all items in your inventory and armor:
+To repair all damaged items in your inventory:
 
 ```
 /repair all
 ```
 
 This repairs:
-- All items in your inventory (including hotbar)
-- All equipped armor pieces
-- Your off-hand item
+- All items in your main inventory (36 slots)
+- All equipped armor pieces (helmet, chestplate, leggings, boots)
+- Your off-hand item (shield slot)
 
-You'll see a message listing all items that were repaired.
+You'll see a message listing all repaired items.
 
 ---
 
@@ -176,9 +206,13 @@ Autofeed automatically restores your hunger when it gets low.
 
 ### How It Works
 
-When autofeed is enabled and your hunger bar drops below 4 bars (8 hunger points / food level 16), your hunger is automatically restored to full. This also restores your saturation.
+When autofeed is enabled:
+- Your hunger is monitored as it decreases
+- When it drops to 16 or below (4+ hunger points lost from maximum of 20), it triggers
+- Your hunger bar is restored to full (20)
+- Your saturation is also restored to full (20)
 
-Autofeed is enabled by default when you first join. Your preference is saved and persists across sessions.
+Autofeed is enabled by default for new players. Your preference is saved and persists across sessions.
 
 ---
 
@@ -186,49 +220,68 @@ Autofeed is enabled by default when you first join. Your preference is saved and
 
 Depending on your permissions, you may have special protections when you die:
 
-### Keep Inventory
+### Keep Inventory (pixelsessentials.keepinv)
 
-If you have this permission, you keep all your items when you die. Nothing drops on the ground.
+When you die:
+- All items stay in your inventory
+- Nothing drops on the ground
 
-### Keep Experience
+### Keep Experience (pixelsessentials.keepxp)
 
-If you have this permission, you keep all your XP levels and progress when you die. No experience orbs are dropped.
+When you die:
+- Your XP level is preserved
+- Your XP progress bar stays the same
+- No experience orbs are dropped
 
-### Keep Position
+### Keep Position (pixelsessentials.keeppos)
 
-If you have this permission, you respawn exactly where you died instead of at your bed or world spawn.
+When you die:
+- You respawn exactly where you died
+- Bypasses bed spawn and world spawn
 
-**Note:** These features depend on server configuration. Ask your server administrator if you have access to these protections.
-
----
-
-## Tips and Tricks
-
-1. **Use descriptive home names** - Names like "nether_portal" or "diamond_mine" are easier to remember than "home1" or "h2".
-
-2. **Save homes in safe locations** - Make sure there's solid ground where you set a home. Teleporting into lava or the void is not fun!
-
-3. **Use `/back` strategically** - If you accidentally teleport to the wrong place, `/back` is your friend.
-
-4. **Repair before big adventures** - Use `/repair all` before heading into dangerous areas to ensure your gear is in top condition.
-
-5. **Enable autofeed for convenience** - If you have permission, autofeed means you never have to worry about eating.
+These permissions are typically granted to specific ranks or groups.
 
 ---
 
 ## Command Quick Reference
 
+### Home Commands
+
 | Command | Description |
 |---------|-------------|
 | `/home` | List all your homes |
 | `/home <name>` | Teleport to a home |
-| `/sethome [name]` | Set a home (default: "home") |
+| `/homes` | List all your homes (alias) |
+| `/sethome` | Set home named "home" |
+| `/sethome <name>` | Set a named home |
 | `/delhome <name>` | Delete a home |
-| `/homeinfo [name]` | Show home coordinates |
+| `/homeinfo` | Show home count summary |
+| `/homeinfo <name>` | Show home coordinates |
+
+### Other Commands
+
+| Command | Description |
+|---------|-------------|
 | `/back` | Return to previous location |
-| `/repair hand` | Repair held item |
-| `/repair all` | Repair all items |
-| `/autofeed on\|off` | Toggle autofeed |
+| `/repair hand` | Repair item in main hand |
+| `/repair all` | Repair all inventory items |
+| `/autofeed` | Check autofeed status |
+| `/autofeed on` | Enable autofeed |
+| `/autofeed off` | Disable autofeed |
+
+---
+
+## Tips
+
+1. **Use descriptive home names** - Names like "nether_portal" or "diamond_mine" are easier to remember than "h1" or "home2".
+
+2. **Save homes in safe locations** - Ensure there's solid ground where you set a home.
+
+3. **Use `/back` strategically** - Accidentally teleport to the wrong place? `/back` returns you.
+
+4. **Repair before adventures** - Use `/repair all` before dangerous expeditions.
+
+5. **Tab completion** - All commands support tab completion for home names.
 
 ---
 

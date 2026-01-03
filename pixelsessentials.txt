@@ -14,6 +14,7 @@ This book teaches you how to use the plugin's features:
 - Back Command
 - Repair Commands
 - Autofeed
+- Death Protections
 
 Turn the page to begin!
 =====================================
@@ -29,6 +30,7 @@ Commands:
 /sethome - Set home named "home"
 /sethome <n> - Set named home
 /delhome <n> - Delete a home
+/homeinfo <n> - View coordinates
 =====================================
 PAGE 3
 =====================================
@@ -45,24 +47,35 @@ For a custom name:
 /sethome farm
 /sethome mine
 
-Names can use letters, numbers, underscores, and dashes.
+Names can use letters, numbers, underscores, and dashes (max 32 characters).
 =====================================
 PAGE 4
 =====================================
+UPDATING HOMES
+
+To move an existing home to your current location, use the same name:
+
+/sethome farm
+
+If "farm" already exists, it updates to your new location.
+
+This does NOT count against your home limit.
+=====================================
+PAGE 5
+=====================================
 TELEPORTING HOME
 
-To go to your default home:
-/home home
-
-To go to a named home:
+To go to a specific home:
 /home farm
 
 To see all your homes:
 /home
 or
 /homes
+
+This shows your homes and how many you have (like 3/5).
 =====================================
-PAGE 5
+PAGE 6
 =====================================
 HOME INFO
 
@@ -71,10 +84,10 @@ To see coordinates of a home:
 
 This shows the world name and X, Y, Z location.
 
-To see how many homes you have:
+To see your home count:
 /homeinfo
 =====================================
-PAGE 6
+PAGE 7
 =====================================
 DELETING HOMES
 
@@ -82,9 +95,11 @@ To remove a saved home:
 
 /delhome farm
 
-The home is permanently deleted. You can create a new one with the same name later.
+The home is permanently deleted.
+
+You can create a new one with the same name later.
 =====================================
-PAGE 7
+PAGE 8
 =====================================
 BACK COMMAND
 
@@ -93,20 +108,21 @@ Returns you to your previous location.
 After teleporting somewhere:
 /back
 
-This takes you back to where you were standing before.
+This takes you back to where you were standing before the teleport.
 =====================================
-PAGE 8
+PAGE 9
 =====================================
 BACK AFTER DEATH
 
-If you die, /back can return you to your death spot.
+If you die, /back can return you to your death spot:
 
-Simply type:
 /back
 
-Note: Returning to death locations may require special permission.
+The plugin tracks teleport and death locations separately.
+
+Returning to death locations requires permission.
 =====================================
-PAGE 9
+PAGE 10
 =====================================
 REPAIR COMMANDS
 
@@ -116,19 +132,22 @@ Fix your damaged items!
 Repairs the item you're holding.
 
 /repair all
-Repairs everything in your inventory and armor.
-=====================================
-PAGE 10
-=====================================
-REPAIR TIPS
-
-- Only damaged items can be repaired (tools, weapons, armor)
-
-- Items already at full durability show a message
-
-- Repair all includes your hotbar, inventory, armor, and offhand
+Repairs everything in your inventory, armor, and off-hand.
 =====================================
 PAGE 11
+=====================================
+REPAIR DETAILS
+
+Only damageable items can be repaired:
+- Tools
+- Weapons  
+- Armor
+
+Items already at full durability will show a message.
+
+You'll see a list of all items that were repaired.
+=====================================
+PAGE 12
 =====================================
 AUTOFEED
 
@@ -143,17 +162,19 @@ Disable autofeed
 /autofeed
 Check current status
 =====================================
-PAGE 12
+PAGE 13
 =====================================
 HOW AUTOFEED WORKS
 
-When enabled, your hunger bar is automatically restored when it gets low.
-
-You never need to eat manually while autofeed is on!
+When enabled:
+- Your hunger is monitored
+- When it drops to 16 or below (lost 4+ points)
+- Hunger restores to full (20)
+- Saturation also restores to full
 
 Your setting is saved between sessions.
 =====================================
-PAGE 13
+PAGE 14
 =====================================
 DEATH PROTECTIONS
 
@@ -168,7 +189,7 @@ Your experience is preserved.
 Keep Position
 You respawn where you died.
 =====================================
-PAGE 14
+PAGE 15
 =====================================
 COMMAND SUMMARY
 
@@ -181,7 +202,19 @@ COMMAND SUMMARY
 /repair all - Fix all
 /autofeed - Toggle feed
 =====================================
-PAGE 15
+PAGE 16
+=====================================
+TIPS
+
+Use descriptive home names like "nether_hub" instead of "h1".
+
+Save homes in safe locations with solid ground.
+
+Use /back if you teleport to the wrong place.
+
+Use /repair all before dangerous adventures.
+=====================================
+PAGE 17
 =====================================
 Thank you for reading!
 
