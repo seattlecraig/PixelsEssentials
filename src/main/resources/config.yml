@@ -34,3 +34,6 @@ sign-update-interval: 60
 
 # Unlock all recipes for players when they join
 unlock-recipes: true
+
+# the name of the lobby world
+lobby-world: "lobby"

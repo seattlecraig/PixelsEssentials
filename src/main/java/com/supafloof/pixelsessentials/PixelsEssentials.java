@@ -26,6 +26,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -260,23 +261,30 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     private boolean debugMode = false;
     
     /**
-     * Temporary storage for death locations pending respawn teleportation (keeppos feature).
+     * Pending death location choices awaiting player GUI selection (keeppos feature).
      * 
      * <p><b>Key:</b> Player UUID</p>
      * <p><b>Value:</b> Cloned Location where the player died</p>
      * 
-     * <p><b>Lifecycle:</b></p>
-     * <ol>
-     *   <li>Entry added in {@link #onPlayerDeath} if player has pixelsessentials.keeppos permission</li>
-     *   <li>Location is cloned to prevent reference issues from the original event</li>
-     *   <li>Entry consumed (removed) in {@link #onPlayerRespawn} to set respawn location</li>
-     *   <li>Entry cleaned up on player quit if they disconnect before respawning</li>
-     * </ol>
-     * 
-     * <p>This map bridges the death and respawn events which occur at different times
-     * and prevents the normal respawn location determination (bed/spawn point).</p>
+     * <p>When a player with keeppos permission dies, their death location is stored here.
+     * They respawn at lobby spawn, then a GUI opens to let them choose whether to
+     * return to their death location or stay safe.</p>
      */
-    private Map<UUID, Location> deathLocations = new HashMap<>();
+    private Map<UUID, Location> pendingDeathLocationChoices = new HashMap<>();
+    
+    /**
+     * Title for the keeppos death location choice GUI.
+     * Used to identify our inventory in InventoryClickEvent.
+     */
+    private static final String KEEPPOS_GUI_TITLE = "Return to Death Location?";
+    
+    /**
+     * Name of the lobby world for keeppos respawning.
+     * Players with keeppos will respawn here before seeing the choice GUI.
+     * 
+     * <p><b>Config:</b> lobby-world (default: "world")</p>
+     */
+    private String lobbyWorldName = "world";
     
     // ==================================================================================
     // INSTANCE VARIABLES - EXTERNAL INTEGRATIONS
@@ -551,6 +559,9 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Recipe unlock on join enabled", NamedTextColor.GREEN));
         }
         
+        // Load lobby world name for keeppos respawning
+        lobbyWorldName = getConfig().getString("lobby-world", "world");
+        
         // Send startup messages to console with Adventure API colored text
         // Green for main message, light purple (magenta) for author credit
         // Uses Adventure API Component instead of legacy color codes
@@ -576,7 +587,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      * are automatically cancelled by Bukkit when the plugin is disabled.</p>
      * 
      * <p><b>Note:</b> Players who die with keeppos and quit before respawning will
-     * lose their stored death location since deathLocations is not persisted.</p>
+     * lose their pending death location choice since it is not persisted.</p>
      */
     @Override
     public void onDisable() {
@@ -588,7 +599,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         // Clear caches
         playerDataCache.clear();
-        deathLocations.clear();
+        pendingDeathLocationChoices.clear();
         
         // Save balance leaderboard signs
         saveBalanceSigns();
@@ -693,16 +704,17 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             }
         }
         
-        // KeepPos - Respawn at death location
-        // If player has permission, store their death location for respawn
+        // KeepPos - Store death location for GUI choice after respawn
+        // Player will respawn at lobby, then get a GUI to choose whether to return
         if (player.hasPermission("pixelsessentials.keeppos")) {
-            // Store death location for respawn handler
-            deathLocations.put(player.getUniqueId(), deathLocation.clone());
+            UUID deathUuid = player.getUniqueId();
+            pendingDeathLocationChoices.put(deathUuid, deathLocation.clone());
             
             if (debugMode) {
                 getLogger().info("[DEBUG] KeepPos: Stored death location for " + player.getName() + 
                     " at " + deathLocation.getWorld().getName() + 
                     " (" + String.format("%.1f, %.1f, %.1f", deathLocation.getX(), deathLocation.getY(), deathLocation.getZ()) + ")");
+                getLogger().info("[DEBUG] KeepPos: Stored with UUID: " + deathUuid);
             }
         }
     }
@@ -710,8 +722,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     /**
      * Handles player respawn events for KeepPos feature.
      * 
-     * <p>If the player died with pixelsessentials.keeppos permission,
-     * teleports them back to their death location after respawn.</p>
+     * <p>Forces respawn to lobby world spawn, then opens a GUI to let player
+     * choose whether to return to death location or stay safe.</p>
      * 
      * @param event The PlayerRespawnEvent
      */
@@ -720,18 +732,112 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
         
-        // Check if this player has a stored death location
-        if (deathLocations.containsKey(uuid)) {
-            Location deathLocation = deathLocations.remove(uuid);
+        // Debug: Always log that respawn handler fired
+        if (debugMode) {
+            getLogger().info("[DEBUG] KeepPos: onPlayerRespawn fired for " + player.getName());
+            getLogger().info("[DEBUG] KeepPos: Checking UUID: " + uuid);
+            getLogger().info("[DEBUG] KeepPos: pendingDeathLocationChoices contains UUID? " + pendingDeathLocationChoices.containsKey(uuid));
+            getLogger().info("[DEBUG] KeepPos: Map size: " + pendingDeathLocationChoices.size());
+        }
+        
+        // Check if this player has a pending death location choice
+        if (pendingDeathLocationChoices.containsKey(uuid)) {
+            // FORCE respawn to lobby world spawn - this is the key fix
+            World lobby = Bukkit.getWorld(lobbyWorldName);
+            if (lobby != null) {
+                event.setRespawnLocation(lobby.getSpawnLocation());
+            } else {
+                // Fallback to overworld spawn if lobby world not found
+                World overworld = Bukkit.getWorlds().get(0);
+                event.setRespawnLocation(overworld.getSpawnLocation());
+                getLogger().warning("[KeepPos] Lobby world '" + lobbyWorldName + "' not found, using " + overworld.getName());
+            }
             
-            // Set respawn location to death location
-            event.setRespawnLocation(deathLocation);
+            // Open the choice GUI after a short delay to let respawn complete
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                if (player.isOnline() && pendingDeathLocationChoices.containsKey(uuid)) {
+                    openDeathLocationChoiceGUI(player);
+                }
+            }, 10L);
             
             if (debugMode) {
-                getLogger().info("[DEBUG] KeepPos: Respawning " + player.getName() + 
-                    " at death location: " + deathLocation.getWorld().getName() + 
-                    " (" + String.format("%.1f, %.1f, %.1f", deathLocation.getX(), deathLocation.getY(), deathLocation.getZ()) + ")");
+                getLogger().info("[DEBUG] KeepPos: Forcing respawn to lobby for " + player.getName());
             }
+        }
+    }
+    
+    /**
+     * Opens the keeppos death location choice GUI for a player.
+     * 
+     * <p>Creates a 1-row (9-slot) inventory with green and red concrete options.</p>
+     * 
+     * @param player The player to show the GUI to
+     */
+    private void openDeathLocationChoiceGUI(Player player) {
+        org.bukkit.inventory.Inventory gui = Bukkit.createInventory(null, 9, 
+            Component.text(KEEPPOS_GUI_TITLE));
+        
+        // Green concrete - Return to death location (slot 2)
+        ItemStack returnItem = new ItemStack(Material.GREEN_CONCRETE);
+        ItemMeta returnMeta = returnItem.getItemMeta();
+        returnMeta.displayName(Component.text("Return to Death Location")
+            .color(NamedTextColor.GREEN)
+            .decoration(TextDecoration.ITALIC, false));
+        returnMeta.lore(List.of(
+            Component.text("Click to teleport back to").color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("where you died").color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
+        ));
+        returnItem.setItemMeta(returnMeta);
+        gui.setItem(2, returnItem);
+        
+        // Red concrete - Stay safe (slot 6)
+        ItemStack stayItem = new ItemStack(Material.RED_CONCRETE);
+        ItemMeta stayMeta = stayItem.getItemMeta();
+        stayMeta.displayName(Component.text("Stay Safe")
+            .color(NamedTextColor.RED)
+            .decoration(TextDecoration.ITALIC, false));
+        stayMeta.lore(List.of(
+            Component.text("Click to remain at your").color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("current safe location").color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
+        ));
+        stayItem.setItemMeta(stayMeta);
+        gui.setItem(6, stayItem);
+        
+        player.openInventory(gui);
+    }
+    
+    /**
+     * Handles inventory click events for the keeppos death location choice GUI.
+     * 
+     * @param event The InventoryClickEvent
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player)) return;
+        
+        Component title = event.getView().title();
+        if (title == null) return;
+        
+        String titleStr = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title);
+        if (!titleStr.equals(KEEPPOS_GUI_TITLE)) return;
+        
+        event.setCancelled(true);
+        
+        Player player = (Player) event.getWhoClicked();
+        UUID uuid = player.getUniqueId();
+        ItemStack clicked = event.getCurrentItem();
+        
+        if (clicked == null || clicked.getType() == Material.AIR) return;
+        
+        Location deathLocation = pendingDeathLocationChoices.remove(uuid);
+        
+        if (clicked.getType() == Material.GREEN_CONCRETE && deathLocation != null) {
+            player.closeInventory();
+            player.teleport(deathLocation);
+            player.sendMessage(Component.text("Returned to your death location.").color(NamedTextColor.GREEN));
+        } else if (clicked.getType() == Material.RED_CONCRETE) {
+            player.closeInventory();
+            player.sendMessage(Component.text("Staying at safe location.").color(NamedTextColor.YELLOW));
         }
     }
     
@@ -811,8 +917,11 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             savePlayerData(uuid);
         }
         
-        // Clean up death location if player quit before respawning
-        deathLocations.remove(uuid);
+        // Clean up pending death location choice if player quit before choosing
+        if (debugMode && pendingDeathLocationChoices.containsKey(uuid)) {
+            getLogger().info("[DEBUG] KeepPos: Clearing pending death location for " + player.getName() + " on quit");
+        }
+        pendingDeathLocationChoices.remove(uuid);
         
         // Clean up any pending sign creation
         pendingBalanceSigns.remove(uuid);
@@ -1828,6 +1937,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             // Reload config values
             unlockRecipesOnJoin = getConfig().getBoolean("unlock-recipes", false);
             signUpdateInterval = getConfig().getInt("sign-update-interval", 60);
+            lobbyWorldName = getConfig().getString("lobby-world", "world");
             
             // Clear player data cache so it reloads from disk on next access
             playerDataCache.clear();
