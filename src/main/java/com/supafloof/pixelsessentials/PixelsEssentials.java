@@ -2415,7 +2415,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      * <p><b>Requires:</b> ItemsAdder plugin to be installed and loaded</p>
      * <p><b>Permission:</b> pixelsessentials.giveenchanteditem</p>
      * 
-     * <p><b>Usage:</b> /gei &lt;player&gt; &lt;ia_item&gt; [count] [name:Custom_Name] [lore:Custom_Lore] [enchant:level]...</p>
+     * <p><b>Usage:</b> /gei &lt;player&gt; &lt;ia_item&gt; [count] [name:Custom_Name] [lore:Custom_Lore] [durability:N] [enchant:level]...</p>
      * 
      * <p><b>Arguments (flexible order after item):</b></p>
      * <ul>
@@ -2424,6 +2424,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      *   <li><b>count:</b> Number of items (1-64, default 1)</li>
      *   <li><b>name:Name:</b> Custom display name (underscores become spaces, supports &amp; color codes)</li>
      *   <li><b>lore:Lore:</b> Custom lore line (underscores become spaces, supports &amp; color codes)</li>
+     *   <li><b>durability:N:</b> Set max durability (e.g., "durability:5000" for 5000 max durability)</li>
      *   <li><b>enchant:level:</b> Enchantment with level (e.g., "protection:30", "mending")</li>
      * </ul>
      * 
@@ -2434,7 +2435,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      *   <li>Enchantment names use Minecraft namespace keys (e.g., "sharpness", "fire_protection")</li>
      * </ul>
      * 
-     * <p><b>Example:</b> /gei Craig fairyset:fairy_helmet 1 name:&amp;6&amp;oAzathoth's_Helmet protection:30 mending aqua_affinity</p>
+     * <p><b>Example:</b> /gei Craig fairyset:fairy_helmet 1 name:&amp;6&amp;oAzathoth's_Helmet durability:5000 protection:30 mending aqua_affinity</p>
      * 
      * <p>If target inventory is full, items are dropped at the player's feet.</p>
      * 
@@ -2451,8 +2452,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         // Check arguments
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /gei <player> <ia_item> [count] [name:Name] [lore:Lore] [enchant:level]...", NamedTextColor.RED));
-            sender.sendMessage(Component.text("Example: /gei Craig fairyset:fairy_helmet 1 name:&6&oAzathoth's_Helmet protection:30 mending", NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("Usage: /gei <player> <ia_item> [count] [name:Name] [lore:Lore] [durability:N] [enchant:level]...", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Example: /gei Craig fairyset:fairy_helmet 1 name:&6&oAzathoth's_Helmet durability:5000 protection:30 mending", NamedTextColor.GRAY));
             sender.sendMessage(Component.text("Note: Underscores become spaces in name/lore. Enchants without :level default to 1.", NamedTextColor.GRAY));
             return true;
         }
@@ -2475,8 +2476,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             return true;
         }
         
-        // Get the ItemStack from the custom item
-        ItemStack itemStack = customStack.getItemStack();
+        // Get the ItemStack from the custom item and CLONE it to break ItemsAdder reference
+        ItemStack itemStack = customStack.getItemStack().clone();
         if (itemStack == null) {
             sender.sendMessage(Component.text("Failed to create item: " + itemId, NamedTextColor.RED));
             return true;
@@ -2486,6 +2487,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         int count = 1;
         String customName = null;
         String customLore = null;
+        int customDurability = -1;  // -1 means not set
         List<String> appliedEnchants = new ArrayList<>();
         List<String> failedEnchants = new ArrayList<>();
         
@@ -2505,6 +2507,16 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 customLore = arg.substring(5).replace('_', ' ');
                 // Translate color codes
                 customLore = ChatColor.translateAlternateColorCodes('&', customLore);
+                continue;
+            }
+            
+            // Check for durability: prefix (sets max durability)
+            if (arg.toLowerCase().startsWith("durability:")) {
+                try {
+                    customDurability = Integer.parseInt(arg.substring(11));
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(Component.text("Invalid durability value: " + arg.substring(11), NamedTextColor.RED));
+                }
                 continue;
             }
             
@@ -2554,27 +2566,32 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             appliedEnchants.add(enchantName + ":" + level);
         }
         
-        // Apply custom name and lore if specified
-        if (customName != null || customLore != null) {
-            ItemMeta meta = itemStack.getItemMeta();
-            if (meta != null) {
-                // Preserve existing lore if we're adding to it
-                List<String> existingLore = meta.getLore();
-                
-                if (customName != null) {
-                    meta.setDisplayName(customName);
-                }
-                if (customLore != null) {
-                    List<String> loreList = new ArrayList<>();
-                    if (existingLore != null) {
-                        loreList.addAll(existingLore);
-                    }
-                    loreList.add(customLore);
-                    meta.setLore(loreList);
-                }
-                
-                itemStack.setItemMeta(meta);
+        // Apply ALL meta modifications in one shot
+        ItemMeta meta = itemStack.getItemMeta();
+        if (meta != null) {
+            // Apply custom name
+            if (customName != null) {
+                meta.setDisplayName(customName);
             }
+            
+            // Apply custom lore
+            if (customLore != null) {
+                List<String> loreList = new ArrayList<>();
+                List<String> existingLore = meta.getLore();
+                if (existingLore != null) {
+                    loreList.addAll(existingLore);
+                }
+                loreList.add(customLore);
+                meta.setLore(loreList);
+            }
+            
+            // Set meta ONCE at the end
+            itemStack.setItemMeta(meta);
+        }
+        
+        // Apply custom max durability using Data Component API (Paper 1.21+)
+        if (customDurability > 0) {
+            itemStack.setData(io.papermc.paper.datacomponent.DataComponentTypes.MAX_DAMAGE, customDurability);
         }
         
         // Set count
@@ -2597,6 +2614,10 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         if (customName != null) {
             msg.append(" named \"").append(customName).append("\"");
+        }
+        
+        if (customDurability > 0) {
+            msg.append(" with ").append(customDurability).append(" max durability");
         }
         
         if (!appliedEnchants.isEmpty()) {
@@ -2640,12 +2661,15 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         if (args.length >= 3) {
             String currentArg = args[args.length - 1].toLowerCase();
             
-            // Suggest name: and lore: prefixes
+            // Suggest name:, lore:, and durability: prefixes
             if ("name:".startsWith(currentArg)) {
                 completions.add("name:");
             }
             if ("lore:".startsWith(currentArg)) {
                 completions.add("lore:");
+            }
+            if ("durability:".startsWith(currentArg)) {
+                completions.add("durability:");
             }
             
             // Suggest common counts
@@ -3332,7 +3356,7 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 case "max_health":
                     // Return max health with exactly 1 decimal point
                     // Uses getAttribute for accurate max health including modifiers
-                    double maxHealth = player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+                    double maxHealth = player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
                     return String.format("%.1f", maxHealth);
                     
                 case "formatted_balance":
@@ -3418,12 +3442,13 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return "";
             }
             
-            short maxDurability = item.getType().getMaxDurability();
-            if (maxDurability == 0) {
+            // Use Data Component API to get actual max damage (supports custom durability)
+            Integer maxDamage = item.getData(io.papermc.paper.datacomponent.DataComponentTypes.MAX_DAMAGE);
+            if (maxDamage == null || maxDamage == 0) {
                 return "";
             }
             
-            return String.valueOf(maxDurability);
+            return String.valueOf(maxDamage);
         }
         
         /**
@@ -3437,17 +3462,19 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return "";
             }
             
-            short maxDurability = item.getType().getMaxDurability();
-            if (maxDurability == 0) {
+            // Use Data Component API to get actual max damage (supports custom durability)
+            Integer maxDamage = item.getData(io.papermc.paper.datacomponent.DataComponentTypes.MAX_DAMAGE);
+            if (maxDamage == null || maxDamage == 0) {
                 return "";
             }
             
-            if (!(item.getItemMeta() instanceof Damageable)) {
-                return "";
+            // Get current damage from the item
+            Integer currentDamage = item.getData(io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE);
+            if (currentDamage == null) {
+                currentDamage = 0;
             }
             
-            int damage = ((Damageable) item.getItemMeta()).getDamage();
-            int currentDurability = maxDurability - damage;
+            int currentDurability = maxDamage - currentDamage;
             
             return String.valueOf(currentDurability);
         }
