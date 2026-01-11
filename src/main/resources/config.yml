@@ -37,3 +37,29 @@ unlock-recipes: true
 
 # the name of the lobby world
 lobby-world: "lobby"
+
+# ============================================
+# BANK NOTE (for /withdraw)
+# ============================================
+# Configuration for bank notes created by the /withdraw command.
+# Bank notes are physical items representing currency that can be
+# traded between players and redeemed by right-clicking.
+#
+bank-note:
+  name: "&aBank Note"                    # Display name of the bank note item
+  lore:                                 # Lore shown on the item (supports placeholders)
+    - "&7Value: &e$%amount%"
+    - "&7Right-click to redeem"
+    - "&7Withdrawn by: &f%player%"
+  glow: true                            # Whether the note item has a glow effect
+  material: PAPER                       # Item type used for the note
+
+# ============================================
+# WITHDRAW SETTINGS
+# ============================================
+# Limits and fees for the /withdraw command.
+#
+withdraw:
+  min: 10                              # Minimum amount allowed per note
+  max: 100000000000000                 # Maximum amount allowed per note
+  fee-percent: 0.0                     # Fee taken as a percentage (charged on top of withdrawn amount)

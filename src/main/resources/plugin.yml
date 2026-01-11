@@ -67,6 +67,12 @@ commands:
     aliases:
       - gei
 
+  withdraw:
+    description: Withdraw money into a physical bank note
+    usage: /withdraw <amount>
+    aliases:
+      - wd
+
 permissions:
   pixelsessentials.repair.hand:
     description: Allows repairing the item in hand
@@ -131,3 +137,7 @@ permissions:
   pixelsessentials.giveenchanteditem:
     description: Allows giving ItemsAdder items with enchantments
     default: op
+
+  pixelsessentials.withdraw:
+    description: Allows withdrawing money into bank notes
+    default: false

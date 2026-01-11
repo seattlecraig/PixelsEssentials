@@ -38,6 +38,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.ItemFlag;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
@@ -52,6 +55,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
+import java.text.NumberFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -279,6 +283,18 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     private static final String KEEPPOS_GUI_TITLE = "Return to Death Location?";
     
     /**
+     * NamespacedKey for storing bank note value in PDC.
+     * Used to identify bank notes and store their monetary value.
+     */
+    private NamespacedKey bankNoteValueKey;
+    
+    /**
+     * NamespacedKey for storing bank note unique ID in PDC.
+     * Used to make each bank note unique (unstackable).
+     */
+    private NamespacedKey bankNoteUniqueKey;
+    
+    /**
      * Name of the lobby world for keeppos respawning.
      * Players with keeppos will respawn here before seeing the choice GUI.
      * 
@@ -489,6 +505,10 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             playerDataFolder.mkdirs();
         }
         
+        // Initialize NamespacedKeys for bank notes
+        bankNoteValueKey = new NamespacedKey(this, "banknote_value");
+        bankNoteUniqueKey = new NamespacedKey(this, "banknote_unique");
+        
         // Save default config.yml if it doesn't exist
         // This creates the configuration file with default sethome-multiple values
         saveDefaultConfig();
@@ -521,6 +541,9 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         getCommand("giveenchanteditem").setExecutor(this);
         getCommand("giveenchanteditem").setTabCompleter(this);
+        
+        getCommand("withdraw").setExecutor(this);
+        getCommand("withdraw").setTabCompleter(this);
         
         // Register event listener for location tracking
         // Handles PlayerTeleportEvent, PlayerDeathEvent, and PlayerQuitEvent
@@ -957,6 +980,45 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     }
     
     /**
+     * Handles bank note redemption when player right-clicks with a bank note.
+     * 
+     * <p>Checks if the item in hand has bank note PDC data and redeems it,
+     * depositing the value to the player's economy balance.</p>
+     * 
+     * @param event The PlayerInteractEvent
+     */
+    @EventHandler(priority = EventPriority.NORMAL)
+    public void onBankNoteRedeem(PlayerInteractEvent event) {
+        // Only handle right-clicks
+        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        
+        Player player = event.getPlayer();
+        ItemStack item = event.getItem();
+        
+        // Check if holding an item
+        if (item == null || item.getType() == Material.AIR) {
+            return;
+        }
+        
+        // Check if it's a bank note
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return;
+        }
+        
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        if (!pdc.has(bankNoteValueKey, PersistentDataType.DOUBLE)) {
+            return;
+        }
+        
+        // It's a bank note - redeem it
+        event.setCancelled(true);
+        redeemBankNote(player, item);
+    }
+    
+    /**
      * Handles player join events to unlock all recipes if configured.
      * 
      * <p>When unlock-recipes is true in config.yml, all registered recipes
@@ -1075,6 +1137,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return handleBackCommand(sender);
             case "giveenchanteditem":
                 return handleGiveEnchantedItemCommand(sender, args);
+            case "withdraw":
+                return handleWithdrawCommand(sender, args);
             case "pixelsessentials":
                 return handleMainCommand(sender, args);
             default:
@@ -2316,6 +2380,8 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
                 return tabCompleteAutofeed(sender, args);
             case "giveenchanteditem":
                 return tabCompleteGiveEnchantedItem(sender, args);
+            case "withdraw":
+                return tabCompleteWithdraw(sender, args);
             case "pixelsessentials":
                 return tabCompleteMain(sender, args);
             default:
@@ -2631,6 +2697,320 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         }
         
         return true;
+    }
+    
+    // ==================================================================================
+    // WITHDRAW COMMAND HANDLERS
+    // ==================================================================================
+    
+    /**
+     * Handles the /withdraw command to create bank notes from player balance.
+     * 
+     * <p>Supports amount suffixes: K (thousands), M (millions), B (billions), T (trillions)</p>
+     * <p>Examples: /withdraw 5000, /withdraw 5.2M, /withdraw 1.5B</p>
+     * 
+     * @param sender The command sender (must be a player)
+     * @param args Command arguments - expects one argument: the amount
+     * @return true if command was handled
+     */
+    private boolean handleWithdrawCommand(CommandSender sender, String[] args) {
+        // Must be a player
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(Component.text("This command can only be used by players.", NamedTextColor.RED));
+            return true;
+        }
+        
+        Player player = (Player) sender;
+        
+        // Check permission
+        if (!player.hasPermission("pixelsessentials.withdraw")) {
+            player.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
+            return true;
+        }
+        
+        // Check economy
+        if (economy == null) {
+            player.sendMessage(Component.text("Economy system is not available.", NamedTextColor.RED));
+            return true;
+        }
+        
+        // Check arguments
+        if (args.length < 1) {
+            player.sendMessage(Component.text("Usage: /withdraw <amount>", NamedTextColor.RED));
+            player.sendMessage(Component.text("Examples: /withdraw 5000, /withdraw 5.2M, /withdraw 1.5B", NamedTextColor.GRAY));
+            return true;
+        }
+        
+        // Parse amount with K/M/B/T suffixes
+        double amount = parseWithdrawAmount(args[0]);
+        if (amount < 0) {
+            player.sendMessage(Component.text("Invalid amount: " + args[0], NamedTextColor.RED));
+            player.sendMessage(Component.text("Examples: 5000, 5.2M, 1.5B, 2T", NamedTextColor.GRAY));
+            return true;
+        }
+        
+        // Load config limits
+        double minAmount = getConfig().getDouble("withdraw.min", 10);
+        double maxAmount = getConfig().getDouble("withdraw.max", 100000000000000.0);
+        double feePercent = getConfig().getDouble("withdraw.fee-percent", 0.0);
+        
+        // Validate min/max
+        if (amount < minAmount) {
+            player.sendMessage(Component.text("Minimum withdrawal amount is $" + formatAmountWithCommas(minAmount), NamedTextColor.RED));
+            return true;
+        }
+        
+        if (amount > maxAmount) {
+            player.sendMessage(Component.text("Maximum withdrawal amount is $" + formatAmountWithCommas(maxAmount), NamedTextColor.RED));
+            return true;
+        }
+        
+        // Calculate fee (charged on top)
+        double fee = amount * (feePercent / 100.0);
+        double totalDeduction = amount + fee;
+        
+        // Check player balance
+        double balance = economy.getBalance(player);
+        if (balance < totalDeduction) {
+            if (fee > 0) {
+                player.sendMessage(Component.text("Insufficient funds. You need $" + formatAmountWithCommas(totalDeduction) + 
+                    " ($" + formatAmountWithCommas(amount) + " + $" + formatAmountWithCommas(fee) + " fee)", NamedTextColor.RED));
+            } else {
+                player.sendMessage(Component.text("Insufficient funds. You need $" + formatAmountWithCommas(totalDeduction), NamedTextColor.RED));
+            }
+            return true;
+        }
+        
+        // Deduct from player
+        economy.withdrawPlayer(player, totalDeduction);
+        
+        // Create bank note
+        ItemStack bankNote = createBankNote(amount, player.getName());
+        
+        // Give to player (drop if inventory full)
+        HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(bankNote);
+        if (!leftover.isEmpty()) {
+            for (ItemStack drop : leftover.values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), drop);
+            }
+            player.sendMessage(Component.text("Inventory full - bank note dropped at your feet.", NamedTextColor.YELLOW));
+        }
+        
+        // Success message
+        if (fee > 0) {
+            player.sendMessage(Component.text("Withdrew $" + formatAmountWithCommas(amount) + 
+                " (fee: $" + formatAmountWithCommas(fee) + ")", NamedTextColor.GREEN));
+        } else {
+            player.sendMessage(Component.text("Withdrew $" + formatAmountWithCommas(amount), NamedTextColor.GREEN));
+        }
+        
+        if (debugMode) {
+            getLogger().info("[DEBUG] Withdraw: " + player.getName() + " withdrew $" + amount + " (fee: $" + fee + ")");
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Parses a withdraw amount string with optional K/M/B/T suffix.
+     * 
+     * <p>Supported formats:</p>
+     * <ul>
+     *   <li>Plain number: 5000 -> 5000</li>
+     *   <li>K suffix: 5K or 5.2K -> 5000 or 5200</li>
+     *   <li>M suffix: 5M or 5.2M -> 5000000 or 5200000</li>
+     *   <li>B suffix: 5B or 5.2B -> 5000000000 or 5200000000</li>
+     *   <li>T suffix: 5T or 1.9T -> 5000000000000 or 1900000000000</li>
+     * </ul>
+     * 
+     * @param input The amount string to parse
+     * @return The parsed amount, or -1 if invalid
+     */
+    private double parseWithdrawAmount(String input) {
+        if (input == null || input.isEmpty()) {
+            return -1;
+        }
+        
+        input = input.toUpperCase().trim();
+        
+        double multiplier = 1;
+        String numPart = input;
+        
+        // Check for suffix
+        if (input.endsWith("K")) {
+            multiplier = 1_000;
+            numPart = input.substring(0, input.length() - 1);
+        } else if (input.endsWith("M")) {
+            multiplier = 1_000_000;
+            numPart = input.substring(0, input.length() - 1);
+        } else if (input.endsWith("B")) {
+            multiplier = 1_000_000_000;
+            numPart = input.substring(0, input.length() - 1);
+        } else if (input.endsWith("T")) {
+            multiplier = 1_000_000_000_000L;
+            numPart = input.substring(0, input.length() - 1);
+        }
+        
+        try {
+            double value = Double.parseDouble(numPart);
+            if (value <= 0) {
+                return -1;
+            }
+            return value * multiplier;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+    
+    /**
+     * Formats an amount with commas for display.
+     * 
+     * @param amount The amount to format
+     * @return Formatted string with commas (e.g., "1,234,567")
+     */
+    private String formatAmountWithCommas(double amount) {
+        // Use NumberFormat for locale-aware comma formatting
+        NumberFormat formatter = NumberFormat.getNumberInstance();
+        formatter.setMaximumFractionDigits(2);
+        formatter.setMinimumFractionDigits(0);
+        return formatter.format(amount);
+    }
+    
+    /**
+     * Creates a bank note ItemStack with the specified value.
+     * 
+     * <p>The bank note has:</p>
+     * <ul>
+     *   <li>Custom display name from config</li>
+     *   <li>Lore with amount (comma-formatted) and player name placeholders</li>
+     *   <li>Optional glow effect (enchant + hide enchants flag)</li>
+     *   <li>PDC data storing the value and unique ID (for unstackability)</li>
+     * </ul>
+     * 
+     * @param amount The monetary value of the note
+     * @param playerName The name of the player who created the note
+     * @return The created bank note ItemStack
+     */
+    private ItemStack createBankNote(double amount, String playerName) {
+        // Get material from config
+        String materialName = getConfig().getString("bank-note.material", "PAPER");
+        Material material = Material.getMaterial(materialName.toUpperCase());
+        if (material == null) {
+            material = Material.PAPER;
+        }
+        
+        ItemStack note = new ItemStack(material, 1);
+        ItemMeta meta = note.getItemMeta();
+        
+        if (meta != null) {
+            // Set display name
+            String name = getConfig().getString("bank-note.name", "&aBank Note");
+            name = ChatColor.translateAlternateColorCodes('&', name);
+            meta.setDisplayName(name);
+            
+            // Set lore with placeholders
+            List<String> configLore = getConfig().getStringList("bank-note.lore");
+            List<String> lore = new ArrayList<>();
+            String formattedAmount = formatAmountWithCommas(amount);
+            
+            for (String line : configLore) {
+                line = line.replace("%amount%", formattedAmount);
+                line = line.replace("%player%", playerName);
+                line = ChatColor.translateAlternateColorCodes('&', line);
+                lore.add(line);
+            }
+            meta.setLore(lore);
+            
+            // Add glow effect if enabled
+            if (getConfig().getBoolean("bank-note.glow", true)) {
+                meta.addEnchant(Enchantment.LUCK_OF_THE_SEA, 1, true);
+                meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            }
+            
+            // Store value in PDC
+            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+            pdc.set(bankNoteValueKey, PersistentDataType.DOUBLE, amount);
+            
+            // Store unique ID to make notes unstackable
+            pdc.set(bankNoteUniqueKey, PersistentDataType.STRING, UUID.randomUUID().toString());
+            
+            note.setItemMeta(meta);
+        }
+        
+        return note;
+    }
+    
+    /**
+     * Handles bank note redemption when a player right-clicks with a bank note.
+     * 
+     * <p>Called from {@link #onPlayerInteract} when detecting a right-click
+     * with an item that has bank note PDC data.</p>
+     * 
+     * @param player The player redeeming the note
+     * @param item The bank note item being redeemed
+     * @return true if the note was successfully redeemed
+     */
+    private boolean redeemBankNote(Player player, ItemStack item) {
+        if (economy == null) {
+            player.sendMessage(Component.text("Economy system is not available.", NamedTextColor.RED));
+            return false;
+        }
+        
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return false;
+        }
+        
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        if (!pdc.has(bankNoteValueKey, PersistentDataType.DOUBLE)) {
+            return false;
+        }
+        
+        double value = pdc.get(bankNoteValueKey, PersistentDataType.DOUBLE);
+        
+        // Deposit to player
+        economy.depositPlayer(player, value);
+        
+        // Remove one note from stack
+        if (item.getAmount() > 1) {
+            item.setAmount(item.getAmount() - 1);
+        } else {
+            player.getInventory().setItemInMainHand(null);
+        }
+        
+        player.sendMessage(Component.text("Redeemed bank note for $" + formatAmountWithCommas(value), NamedTextColor.GREEN));
+        
+        if (debugMode) {
+            getLogger().info("[DEBUG] BankNote: " + player.getName() + " redeemed $" + value);
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Tab completion for /withdraw command.
+     * Suggests common amounts and suffix examples.
+     */
+    private List<String> tabCompleteWithdraw(CommandSender sender, String[] args) {
+        List<String> completions = new ArrayList<>();
+        
+        if (!sender.hasPermission("pixelsessentials.withdraw")) {
+            return completions;
+        }
+        
+        if (args.length == 1) {
+            String partial = args[0].toLowerCase();
+            
+            // Suggest common amounts
+            String[] suggestions = {"100", "1000", "10000", "100K", "500K", "1M", "5M", "10M", "100M", "1B"};
+            for (String suggestion : suggestions) {
+                if (suggestion.toLowerCase().startsWith(partial)) {
+                    completions.add(suggestion);
+                }
+            }
+        }
+        
+        return completions;
     }
     
     /**
