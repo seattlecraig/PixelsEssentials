@@ -141,3 +141,7 @@ permissions:
   pixelsessentials.withdraw:
     description: Allows withdrawing money into bank notes
     default: false
+
+  pixelsessentials.enderchest.extended:
+    description: Allows access to 54-slot extended ender chest instead of vanilla 27 slots
+    default: false

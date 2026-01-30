@@ -10,11 +10,12 @@ Complete installation, configuration, permissions, and administration reference 
 2. [Configuration](#configuration)
 3. [Permissions Reference](#permissions-reference)
 4. [Admin Commands](#admin-commands)
-5. [Balance Leaderboard Signs](#balance-leaderboard-signs)
-6. [PlaceholderAPI Integration](#placeholderapi-integration)
-7. [Player Data Management](#player-data-management)
-8. [Integration with ItemsAdder](#integration-with-itemsadder)
-9. [Debug Mode](#debug-mode)
+5. [Extended Ender Chest](#extended-ender-chest)
+6. [Balance Leaderboard Signs](#balance-leaderboard-signs)
+7. [PlaceholderAPI Integration](#placeholderapi-integration)
+8. [Player Data Management](#player-data-management)
+9. [Integration with ItemsAdder](#integration-with-itemsadder)
+10. [Debug Mode](#debug-mode)
 
 ---
 
@@ -143,6 +144,7 @@ This:
 | Permission | Description | Default |
 |------------|-------------|---------|
 | `pixelsessentials.autofeed` | Use autofeed feature | op |
+| `pixelsessentials.enderchest.extended` | Use 54-slot extended ender chest | false |
 | `pixelsessentials.giveenchanteditem` | Use `/gei` command | op |
 | `pixelsessentials.reload` | Reload plugin configuration | op |
 | `pixelsessentials.debug` | Toggle debug mode | op |
@@ -270,6 +272,54 @@ Repairs all items in the target player's inventory, armor, and off-hand. Both th
 - Enchantments without `:level` default to level 1
 - Custom lore is appended to existing ItemsAdder lore
 - If inventory is full, items drop at the player's feet
+
+---
+
+## Extended Ender Chest
+
+Players with the `pixelsessentials.enderchest.extended` permission get a 54-slot ender chest instead of the vanilla 27 slots.
+
+### How It Works
+
+When a player with the permission opens an ender chest (via block interaction or `/ec` command):
+- A custom 54-slot inventory opens instead of the vanilla 27-slot ender chest
+- First 27 slots are synced with the vanilla ender chest
+- Second 27 slots are stored separately per-player
+
+### Data Storage
+
+Extended slots are stored in:
+```
+plugins/PixelsEssentials/playerdata/<uuid>_enderchest.yml
+```
+
+The data is Base64-encoded for compact storage and is separate from the main player data file.
+
+### Performance Optimizations
+
+- **Lazy Loading** - Extended slots only load when the player opens an ender chest
+- **Async Saves** - Contents are saved asynchronously to avoid main thread lag
+- **Separate Storage** - Keeps main player data files fast and small
+
+### Permission
+
+| Permission | Description | Default |
+|------------|-------------|---------|
+| `pixelsessentials.enderchest.extended` | Access to 54-slot ender chest | false |
+
+**Important:** This permission defaults to `false` for all players including ops. You must explicitly grant it.
+
+### LuckPerms Example
+
+```
+/lp group vip permission set pixelsessentials.enderchest.extended true
+```
+
+### Compatibility Notes
+
+- Works with both physical ender chest blocks and `/ec` commands from other plugins (e.g., EssentialsX)
+- First 27 slots remain synced with vanilla, so items are preserved if permission is removed
+- Extended slots persist across deaths (like vanilla ender chest)
 
 ---
 

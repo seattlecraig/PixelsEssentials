@@ -14,6 +14,7 @@ This book teaches you how to use the plugin's features:
 - Back Command
 - Repair Commands
 - Autofeed
+- Extended Ender Chest
 - Death Protections
 
 Turn the page to begin!
@@ -176,6 +177,24 @@ Your setting is saved between sessions.
 =====================================
 PAGE 14
 =====================================
+EXTENDED ENDER CHEST
+
+If you have the permission, your ender chest is upgraded to 54 slots (double size)!
+
+The first 27 slots work like normal. The extra 27 slots give you more storage.
+=====================================
+PAGE 15
+=====================================
+EXTENDED ENDER CHEST
+
+Works when you:
+- Right-click an ender chest
+- Use /ec command
+
+Your extra slots persist across deaths, just like normal ender chests.
+=====================================
+PAGE 16
+=====================================
 DEATH PROTECTIONS
 
 You may have special protections when you die:
@@ -189,7 +208,7 @@ Your experience is preserved.
 Keep Position
 You respawn where you died.
 =====================================
-PAGE 15
+PAGE 17
 =====================================
 COMMAND SUMMARY
 
@@ -202,7 +221,7 @@ COMMAND SUMMARY
 /repair all - Fix all
 /autofeed - Toggle feed
 =====================================
-PAGE 16
+PAGE 18
 =====================================
 TIPS
 
@@ -214,7 +233,7 @@ Use /back if you teleport to the wrong place.
 
 Use /repair all before dangerous adventures.
 =====================================
-PAGE 17
+PAGE 19
 =====================================
 Thank you for reading!
 

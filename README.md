@@ -53,6 +53,15 @@ Never worry about hunger with automatic food restoration.
 - Triggers when hunger drops below threshold
 - Restores both hunger and saturation to full
 
+### 📦 Extended Ender Chest
+Permission-based 54-slot ender chest upgrade.
+
+- Double the storage (54 slots instead of 27)
+- Works with ender chest blocks and `/ec` commands
+- First 27 slots sync with vanilla ender chest
+- Extra slots persist across deaths
+- Lazy loading and async saves for performance
+
 ### ☠️ Death Protections
 Configurable death behavior with separate permissions.
 

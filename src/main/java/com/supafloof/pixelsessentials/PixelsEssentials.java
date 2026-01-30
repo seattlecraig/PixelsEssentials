@@ -27,6 +27,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -34,8 +37,11 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.ItemFlag;
@@ -77,6 +83,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><b>Back Command:</b> Return to previous location before teleport or death (with permission check for death)</li>
  *   <li><b>Death Management:</b> Optional keep inventory (keepinv), keep XP (keepxp), and keep position (keeppos)</li>
  *   <li><b>Autofeed System:</b> Automatically restores hunger to full when it drops below threshold</li>
+ *   <li><b>Extended Ender Chest:</b> Permission-based 54-slot ender chest with lazy loading and async saves</li>
  *   <li><b>Balance Leaderboard Signs:</b> Physical signs displaying top player balances with periodic updates</li>
  *   <li><b>Recipe Unlock:</b> Optional automatic recipe discovery on player join</li>
  *   <li><b>PlaceholderAPI Integration:</b> Custom placeholders for health, balance, and armor durability</li>
@@ -112,6 +119,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><b>pixelsessentials.keepinv:</b> Preserve inventory contents on death (no item drops)</li>
  *   <li><b>pixelsessentials.keeppos:</b> Respawn at death location instead of spawn point</li>
  *   <li><b>pixelsessentials.back.ondeath:</b> Allow /back to return to death location</li>
+ * </ul>
+ * 
+ * <h2>Extended Ender Chest</h2>
+ * <p>Players with the pixelsessentials.enderchest.extended permission get a 54-slot ender chest
+ * instead of the vanilla 27 slots. The first 27 slots are synced with the vanilla ender chest,
+ * while the extra 27 slots are stored separately in playerdata/{uuid}_enderchest.yml.</p>
+ * 
+ * <p><b>Technical details:</b></p>
+ * <ul>
+ *   <li><b>Permission:</b> pixelsessentials.enderchest.extended</li>
+ *   <li><b>Triggers:</b> Right-clicking ender chest blocks AND /ec commands from other plugins</li>
+ *   <li><b>Storage:</b> Base64-encoded ItemStack array for compact, efficient storage</li>
+ *   <li><b>Loading:</b> Lazy-loaded only when player opens an ender chest</li>
+ *   <li><b>Saving:</b> Asynchronous to avoid main thread lag</li>
+ *   <li><b>Persistence:</b> Survives death (like vanilla ender chest)</li>
  * </ul>
  * 
  * <h2>PlaceholderAPI Placeholders</h2>
@@ -301,6 +323,43 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
      * <p><b>Config:</b> lobby-world (default: "world")</p>
      */
     private String lobbyWorldName = "world";
+    
+    // ==================================================================================
+    // INSTANCE VARIABLES - EXTENDED ENDER CHEST
+    // ==================================================================================
+    
+    /**
+     * Title for the extended ender chest inventory (54 slots).
+     * Used to identify our custom inventory in InventoryClickEvent and InventoryCloseEvent.
+     */
+    private static final String EXTENDED_ENDERCHEST_TITLE = "Ender Chest";
+    
+    /**
+     * Cache of extended ender chest contents (the extra 27 slots beyond vanilla).
+     * 
+     * <p><b>Key:</b> Player UUID</p>
+     * <p><b>Value:</b> ItemStack array of size 27 containing the extended slots</p>
+     * 
+     * <p>This cache is separate from PlayerData for performance reasons:</p>
+     * <ul>
+     *   <li>Lazy loading - only loaded when player actually opens an ender chest</li>
+     *   <li>Not loaded with regular PlayerData to keep that fast</li>
+     *   <li>Stored in separate file: playerdata/{uuid}_enderchest.yml</li>
+     * </ul>
+     * 
+     * <p>Contents are saved asynchronously when the inventory is closed to avoid
+     * main thread lag from Base64 serialization and file I/O.</p>
+     */
+    private Map<UUID, ItemStack[]> extendedEnderChestCache = new ConcurrentHashMap<>();
+    
+    /**
+     * Tracks which players currently have an extended ender chest open.
+     * Used to identify our custom inventory on close events.
+     * 
+     * <p><b>Key:</b> Player UUID</p>
+     * <p><b>Value:</b> The Inventory instance they have open</p>
+     */
+    private Map<UUID, Inventory> openExtendedEnderChests = new ConcurrentHashMap<>();
     
     // ==================================================================================
     // INSTANCE VARIABLES - EXTERNAL INTEGRATIONS
@@ -667,11 +726,25 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     public void onPlayerTeleport(PlayerTeleportEvent event) {
         Player player = event.getPlayer();
         Location from = event.getFrom();
+        Location to = event.getTo();
+        
+        // Null check
+        if (to == null) return;
         
         // Don't track if teleporting within the same block (minor movements)
-        Location to = event.getTo();
-        if (to != null && from.getWorld().equals(to.getWorld()) 
-            && from.distanceSquared(to) < 1.0) {
+        if (from.getWorld().equals(to.getWorld()) && from.distanceSquared(to) < 1.0) {
+            return;
+        }
+        
+        // Don't track teleports involving EliteMobs worlds
+        // EliteMobs handles its own teleportation and these worlds are transient/instanced
+        String fromWorld = from.getWorld().getName();
+        String toWorld = to.getWorld().getName();
+        if (fromWorld.startsWith("em_") || toWorld.startsWith("em_")) {
+            if (debugMode) {
+                getLogger().info("[DEBUG] Skipping /back tracking for EliteMobs world teleport: " 
+                    + fromWorld + " -> " + toWorld);
+            }
             return;
         }
         
@@ -948,6 +1021,17 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         // Clean up any pending sign creation
         pendingBalanceSigns.remove(uuid);
+        
+        // Clean up extended ender chest tracking
+        // Note: If player quits with inventory open, the InventoryCloseEvent
+        // should fire first, but we clean up here as a safety measure
+        Inventory openEnderChest = openExtendedEnderChests.remove(uuid);
+        if (openEnderChest != null && debugMode) {
+            getLogger().info("[DEBUG] ExtendedEnderChest: Cleaned up open inventory for " + player.getName() + " on quit");
+        }
+        
+        // Clear extended ender chest from cache (it's already saved or will be)
+        extendedEnderChestCache.remove(uuid);
     }
     
     /**
@@ -1016,6 +1100,137 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         // It's a bank note - redeem it
         event.setCancelled(true);
         redeemBankNote(player, item);
+    }
+    
+    /**
+     * Handles player right-click on ender chest blocks for extended ender chest feature.
+     * 
+     * <p>If the player has the pixelsessentials.enderchest.extended permission,
+     * opens a custom 54-slot inventory instead of the vanilla 27-slot ender chest.
+     * The first 27 slots mirror the vanilla ender chest, while the second 27 slots
+     * are stored in a separate file for persistence.</p>
+     * 
+     * <p><b>Permission:</b> pixelsessentials.enderchest.extended</p>
+     * 
+     * @param event The PlayerInteractEvent
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onEnderChestInteract(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (event.getClickedBlock() == null) return;
+        if (event.getClickedBlock().getType() != Material.ENDER_CHEST) return;
+        
+        Player player = event.getPlayer();
+        
+        // Only intercept if player has extended permission
+        if (!player.hasPermission("pixelsessentials.enderchest.extended")) {
+            return;
+        }
+        
+        // Check if player is sneaking with an item (placing block behavior)
+        if (player.isSneaking() && player.getInventory().getItemInMainHand().getType() != Material.AIR) {
+            return;
+        }
+        
+        // Cancel vanilla ender chest opening
+        event.setCancelled(true);
+        
+        // Open our extended ender chest
+        openExtendedEnderChest(player);
+    }
+    
+    /**
+     * Handles inventory close events for extended ender chest saving.
+     * 
+     * <p>When a player closes an extended ender chest, this handler:</p>
+     * <ol>
+     *   <li>Syncs the first 27 slots back to the vanilla ender chest</li>
+     *   <li>Saves the second 27 slots to the extended storage file asynchronously</li>
+     * </ol>
+     * 
+     * @param event The InventoryCloseEvent
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClose(InventoryCloseEvent event) {
+        if (!(event.getPlayer() instanceof Player)) return;
+        
+        Player player = (Player) event.getPlayer();
+        UUID uuid = player.getUniqueId();
+        
+        // Check if this is one of our extended ender chests
+        Inventory openInv = openExtendedEnderChests.remove(uuid);
+        if (openInv == null || openInv != event.getInventory()) {
+            return;
+        }
+        
+        if (debugMode) {
+            getLogger().info("[DEBUG] ExtendedEnderChest: Closing for " + player.getName());
+        }
+        
+        // Get the inventory contents
+        ItemStack[] contents = event.getInventory().getContents();
+        
+        // Sync first 27 slots back to vanilla ender chest
+        Inventory vanillaEnderChest = player.getEnderChest();
+        for (int i = 0; i < 27; i++) {
+            vanillaEnderChest.setItem(i, contents[i]);
+        }
+        
+        // Extract extended slots (27-53)
+        ItemStack[] extendedSlots = new ItemStack[27];
+        for (int i = 0; i < 27; i++) {
+            extendedSlots[i] = contents[i + 27];
+        }
+        
+        // Update cache
+        extendedEnderChestCache.put(uuid, extendedSlots);
+        
+        // Save asynchronously
+        saveExtendedEnderChestAsync(uuid, extendedSlots);
+    }
+    
+    /**
+     * Handles inventory open events to intercept /ec commands from other plugins.
+     * 
+     * <p>When a player with pixelsessentials.enderchest.extended permission opens
+     * a vanilla ender chest (via /ec or similar commands), this handler cancels
+     * the vanilla inventory and opens our extended 54-slot version instead.</p>
+     * 
+     * <p>This complements {@link #onEnderChestInteract} which handles physical
+     * ender chest block interactions.</p>
+     * 
+     * @param event The InventoryOpenEvent
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        // Only handle ender chest inventories
+        if (event.getInventory().getType() != InventoryType.ENDER_CHEST) return;
+        if (!(event.getPlayer() instanceof Player)) return;
+        
+        Player player = (Player) event.getPlayer();
+        
+        // Only intercept if player has extended permission
+        if (!player.hasPermission("pixelsessentials.enderchest.extended")) {
+            return;
+        }
+        
+        // Check if we already have an extended chest open for this player
+        // (prevents recursion if something weird happens)
+        if (openExtendedEnderChests.containsKey(player.getUniqueId())) {
+            return;
+        }
+        
+        if (debugMode) {
+            getLogger().info("[DEBUG] ExtendedEnderChest: Intercepted vanilla ender chest open for " + player.getName() + " (likely /ec command)");
+        }
+        
+        // Cancel the vanilla ender chest
+        event.setCancelled(true);
+        
+        // Open our extended version on next tick to avoid issues with cancelled event
+        Bukkit.getScheduler().runTask(this, () -> {
+            openExtendedEnderChest(player);
+        });
     }
     
     /**
@@ -1886,6 +2101,17 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         Player player = (Player) sender;
         UUID uuid = player.getUniqueId();
         
+        // Block command in EliteMobs worlds - use EliteMobs transporter or /em to leave
+        String currentWorld = player.getWorld().getName();
+        if (currentWorld.startsWith("em_")) {
+            player.sendMessage(Component.text("You cannot use /back in EliteMobs dungeons. Use the ", NamedTextColor.RED)
+                .append(Component.text("Transporter NPC", NamedTextColor.GOLD))
+                .append(Component.text(" or ", NamedTextColor.RED))
+                .append(Component.text("/em quit", NamedTextColor.GOLD))
+                .append(Component.text(" to leave.", NamedTextColor.RED)));
+            return true;
+        }
+        
         // Check permission
         if (!player.hasPermission("pixelsessentials.back")) {
             player.sendMessage(Component.text("You don't have permission to use this command.", NamedTextColor.RED));
@@ -2344,6 +2570,209 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         
         // Return at least 1 if player has base sethome permission but no tier
         return Math.max(maxHomes, 1);
+    }
+    
+    // ==================================================================================
+    // EXTENDED ENDER CHEST METHODS
+    // ==================================================================================
+    
+    /**
+     * Opens the extended 54-slot ender chest for a player.
+     * 
+     * <p>Creates a custom inventory containing:</p>
+     * <ul>
+     *   <li>Slots 0-26: Contents from the player's vanilla ender chest</li>
+     *   <li>Slots 27-53: Contents from the extended storage (lazy loaded)</li>
+     * </ul>
+     * 
+     * @param player The player to open the ender chest for
+     */
+    private void openExtendedEnderChest(Player player) {
+        UUID uuid = player.getUniqueId();
+        
+        if (debugMode) {
+            getLogger().info("[DEBUG] ExtendedEnderChest: Opening for " + player.getName());
+        }
+        
+        // Create 54-slot inventory (double chest size)
+        Inventory extendedChest = Bukkit.createInventory(player, 54, 
+            Component.text(EXTENDED_ENDERCHEST_TITLE));
+        
+        // Copy vanilla ender chest contents to first 27 slots
+        Inventory vanillaEnderChest = player.getEnderChest();
+        for (int i = 0; i < 27; i++) {
+            extendedChest.setItem(i, vanillaEnderChest.getItem(i));
+        }
+        
+        // Load extended slots (lazy loading)
+        ItemStack[] extendedSlots = loadExtendedEnderChest(uuid);
+        for (int i = 0; i < 27; i++) {
+            extendedChest.setItem(i + 27, extendedSlots[i]);
+        }
+        
+        // Track this inventory so we can identify it on close
+        openExtendedEnderChests.put(uuid, extendedChest);
+        
+        // Open the inventory
+        player.openInventory(extendedChest);
+        
+        // Play ender chest open sound
+        player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_ENDER_CHEST_OPEN, 1.0f, 1.0f);
+    }
+    
+    /**
+     * Loads extended ender chest contents for a player (lazy loading).
+     * 
+     * <p>First checks the in-memory cache. If not cached, loads from
+     * the player's extended ender chest file: playerdata/{uuid}_enderchest.yml</p>
+     * 
+     * <p>The file stores contents as Base64-encoded serialized ItemStack array
+     * for compact storage.</p>
+     * 
+     * @param uuid The player's UUID
+     * @return ItemStack array of size 27 (may contain null elements for empty slots)
+     */
+    private ItemStack[] loadExtendedEnderChest(UUID uuid) {
+        // Check cache first
+        ItemStack[] cached = extendedEnderChestCache.get(uuid);
+        if (cached != null) {
+            if (debugMode) {
+                getLogger().info("[DEBUG] ExtendedEnderChest: Loaded from cache for " + uuid);
+            }
+            return cached;
+        }
+        
+        // Load from file
+        File file = new File(playerDataFolder, uuid.toString() + "_enderchest.yml");
+        if (!file.exists()) {
+            if (debugMode) {
+                getLogger().info("[DEBUG] ExtendedEnderChest: No file exists for " + uuid + ", returning empty");
+            }
+            ItemStack[] empty = new ItemStack[27];
+            extendedEnderChestCache.put(uuid, empty);
+            return empty;
+        }
+        
+        try {
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+            String base64 = config.getString("contents");
+            
+            if (base64 == null || base64.isEmpty()) {
+                if (debugMode) {
+                    getLogger().info("[DEBUG] ExtendedEnderChest: Empty contents for " + uuid);
+                }
+                ItemStack[] empty = new ItemStack[27];
+                extendedEnderChestCache.put(uuid, empty);
+                return empty;
+            }
+            
+            ItemStack[] contents = itemStackArrayFromBase64(base64);
+            extendedEnderChestCache.put(uuid, contents);
+            
+            if (debugMode) {
+                int itemCount = 0;
+                for (ItemStack item : contents) {
+                    if (item != null) itemCount++;
+                }
+                getLogger().info("[DEBUG] ExtendedEnderChest: Loaded " + itemCount + " items from file for " + uuid);
+            }
+            
+            return contents;
+            
+        } catch (Exception e) {
+            getLogger().severe("Failed to load extended ender chest for " + uuid + ": " + e.getMessage());
+            ItemStack[] empty = new ItemStack[27];
+            extendedEnderChestCache.put(uuid, empty);
+            return empty;
+        }
+    }
+    
+    /**
+     * Saves extended ender chest contents asynchronously.
+     * 
+     * <p>Serializes the ItemStack array to Base64 and writes to
+     * playerdata/{uuid}_enderchest.yml on an async thread to avoid
+     * blocking the main server thread.</p>
+     * 
+     * @param uuid The player's UUID
+     * @param contents The extended slot contents (27 items)
+     */
+    private void saveExtendedEnderChestAsync(UUID uuid, ItemStack[] contents) {
+        // Clone the contents array to avoid concurrent modification
+        final ItemStack[] contentsCopy = new ItemStack[contents.length];
+        for (int i = 0; i < contents.length; i++) {
+            contentsCopy[i] = contents[i] != null ? contents[i].clone() : null;
+        }
+        
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            try {
+                String base64 = itemStackArrayToBase64(contentsCopy);
+                
+                File file = new File(playerDataFolder, uuid.toString() + "_enderchest.yml");
+                YamlConfiguration config = new YamlConfiguration();
+                config.set("contents", base64);
+                config.save(file);
+                
+                if (debugMode) {
+                    int itemCount = 0;
+                    for (ItemStack item : contentsCopy) {
+                        if (item != null) itemCount++;
+                    }
+                    getLogger().info("[DEBUG] ExtendedEnderChest: Saved " + itemCount + " items for " + uuid);
+                }
+                
+            } catch (Exception e) {
+                getLogger().severe("Failed to save extended ender chest for " + uuid + ": " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * Serializes an ItemStack array to a Base64 string.
+     * 
+     * <p>Uses BukkitObjectOutputStream for proper serialization of all
+     * ItemStack data including enchantments, lore, PDC, and NBT.</p>
+     * 
+     * @param items The ItemStack array to serialize
+     * @return Base64-encoded string representation
+     * @throws IOException If serialization fails
+     */
+    private String itemStackArrayToBase64(ItemStack[] items) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream)) {
+            dataOutput.writeInt(items.length);
+            for (ItemStack item : items) {
+                dataOutput.writeObject(item);
+            }
+        }
+        return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+    }
+    
+    /**
+     * Deserializes an ItemStack array from a Base64 string.
+     * 
+     * <p>Uses BukkitObjectInputStream for proper deserialization of all
+     * ItemStack data including enchantments, lore, PDC, and NBT.</p>
+     * 
+     * @param base64 The Base64-encoded string to deserialize
+     * @return The deserialized ItemStack array
+     * @throws IOException If deserialization fails
+     */
+    private ItemStack[] itemStackArrayFromBase64(String base64) throws IOException {
+        byte[] bytes = Base64.getDecoder().decode(base64);
+        ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes);
+        try (BukkitObjectInputStream dataInput = new BukkitObjectInputStream(inputStream)) {
+            int size = dataInput.readInt();
+            ItemStack[] items = new ItemStack[size];
+            for (int i = 0; i < size; i++) {
+                try {
+                    items[i] = (ItemStack) dataInput.readObject();
+                } catch (ClassNotFoundException e) {
+                    items[i] = null;
+                }
+            }
+            return items;
+        }
     }
     
     // ==================================================================================

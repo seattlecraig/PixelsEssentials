@@ -10,8 +10,9 @@ Welcome to PixelsEssentials! This guide covers all the features available to you
 2. [Back Command](#back-command)
 3. [Repair Commands](#repair-commands)
 4. [Autofeed](#autofeed)
-5. [Death Protections](#death-protections)
-6. [Command Quick Reference](#command-quick-reference)
+5. [Extended Ender Chest](#extended-ender-chest)
+6. [Death Protections](#death-protections)
+7. [Command Quick Reference](#command-quick-reference)
 
 ---
 
@@ -213,6 +214,24 @@ When autofeed is enabled:
 - Your saturation is also restored to full (20)
 
 Autofeed is enabled by default for new players. Your preference is saved and persists across sessions.
+
+---
+
+## Extended Ender Chest
+
+If you have the extended ender chest permission, your ender chest is upgraded from 27 slots to 54 slots (double chest size).
+
+### How It Works
+
+When you open an ender chest (either by right-clicking the block or using `/ec`):
+- The first 27 slots work exactly like the normal ender chest
+- The second 27 slots provide extra storage
+
+### Important Notes
+
+- **Persistence** - Your extended slots persist across deaths, just like the normal ender chest
+- **Compatibility** - The first 27 slots stay synced with the vanilla ender chest, so if you lose the permission, you keep those items
+- **All Access Methods** - Works when right-clicking an ender chest block AND when using commands like `/ec` from other plugins
 
 ---
 

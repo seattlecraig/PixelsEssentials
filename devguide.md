@@ -76,6 +76,8 @@ public class PixelsEssentials extends JavaPlugin
 | `unlockRecipesOnJoin` | `boolean` | Recipe auto-unlock toggle |
 | `topBalancesCache` | `List<Map.Entry<UUID, Double>>` | Cached balance rankings |
 | `topBalancesCacheTime` | `long` | Cache timestamp for validity checking |
+| `extendedEnderChestCache` | `ConcurrentHashMap<UUID, ItemStack[]>` | Cache of extended ender chest slots (lazy loaded) |
+| `openExtendedEnderChests` | `ConcurrentHashMap<UUID, Inventory>` | Tracks open extended ender chest inventories |
 
 ### Inner Class: PlayerData
 
@@ -248,6 +250,104 @@ PlayerRespawnEvent (HIGHEST priority)
         Use lastTeleportLocation
 ```
 
+### Extended Ender Chest Data Flow
+
+```
+Player opens ender chest (block or /ec command)
+         │
+         ▼
+    Has pixelsessentials.enderchest.extended?
+         │
+    No ──┴──► Normal vanilla ender chest opens
+         │
+    Yes  │
+         ▼
+    Cancel vanilla inventory open
+         │
+         ▼
+    openExtendedEnderChest(player)
+         │
+         ├─── Create 54-slot Bukkit Inventory
+         │
+         ├─── Copy vanilla ender chest (27 slots) to slots 0-26
+         │
+         ├─── loadExtendedEnderChest(uuid)
+         │         │
+         │         ├── Cache Hit ──► Return cached ItemStack[27]
+         │         │
+         │         ▼ Cache Miss
+         │    Load from {uuid}_enderchest.yml
+         │         │
+         │         ▼
+         │    Base64 decode → BukkitObjectInputStream → ItemStack[27]
+         │         │
+         │         ▼
+         │    Store in extendedEnderChestCache
+         │
+         ├─── Copy extended slots to slots 27-53
+         │
+         ├─── Track in openExtendedEnderChests map
+         │
+         └─── player.openInventory()
+
+Player closes extended ender chest
+         │
+         ▼
+    InventoryCloseEvent (MONITOR)
+         │
+         ▼
+    Is inventory in openExtendedEnderChests?
+         │
+    No ──┴──► Ignore (not our inventory)
+         │
+    Yes  │
+         ▼
+    Sync slots 0-26 back to vanilla ender chest
+         │
+         ▼
+    Extract slots 27-53 as ItemStack[27]
+         │
+         ▼
+    Update extendedEnderChestCache
+         │
+         ▼
+    saveExtendedEnderChestAsync(uuid, contents)
+         │
+         ├── Clone ItemStack array
+         │
+         └── Async: BukkitObjectOutputStream → Base64 → YAML file
+```
+
+### Extended Ender Chest Serialization
+
+```java
+// Serialize ItemStack[] to Base64
+private String itemStackArrayToBase64(ItemStack[] items) throws IOException {
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+    try (BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream)) {
+        dataOutput.writeInt(items.length);
+        for (ItemStack item : items) {
+            dataOutput.writeObject(item);
+        }
+    }
+    return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+}
+
+// Deserialize Base64 to ItemStack[]
+private ItemStack[] itemStackArrayFromBase64(String base64) throws IOException {
+    byte[] bytes = Base64.getDecoder().decode(base64);
+    ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes);
+    try (BukkitObjectInputStream dataInput = new BukkitObjectInputStream(inputStream)) {
+        int size = dataInput.readInt();
+        ItemStack[] items = new ItemStack[size];
+        for (int i = 0; i < size; i++) {
+            items[i] = (ItemStack) dataInput.readObject();
+        }
+        return items;
+    }
+}
+```
+
 ---
 
 ## Event System
@@ -261,8 +361,10 @@ PlayerRespawnEvent (HIGHEST priority)
 | `PlayerRespawnEvent` | HIGHEST | false | Keeppos respawn teleport |
 | `FoodLevelChangeEvent` | HIGHEST | false | Autofeed hunger restoration |
 | `PlayerQuitEvent` | MONITOR | false | Save logout location and persist data |
-| `PlayerInteractEvent` | HIGH | false | Balance sign creation |
+| `PlayerInteractEvent` | HIGH | false | Balance sign creation, ender chest block interaction |
 | `PlayerJoinEvent` | MONITOR | false | Recipe unlock on join |
+| `InventoryOpenEvent` | HIGH | false | Intercept vanilla ender chest for extended version |
+| `InventoryCloseEvent` | MONITOR | false | Save extended ender chest contents |
 
 ### Event Priority Rationale
 
@@ -274,7 +376,11 @@ PlayerRespawnEvent (HIGHEST priority)
 
 - **MONITOR for teleport/quit/join:** Observation only - doesn't modify the event outcome, just records data.
 
-- **HIGH for PlayerInteractEvent:** Runs before most handlers to intercept sign clicks for balance sign creation.
+- **HIGH for PlayerInteractEvent:** Runs before most handlers to intercept sign clicks for balance sign creation and ender chest block interaction.
+
+- **HIGH for InventoryOpenEvent:** Intercepts vanilla ender chest open events (from `/ec` commands) before other plugins, allowing replacement with extended version.
+
+- **MONITOR for InventoryCloseEvent:** Observes inventory close to sync and save extended ender chest contents.
 
 ---
 
