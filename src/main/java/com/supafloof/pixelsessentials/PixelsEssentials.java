@@ -468,6 +468,47 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     private boolean unlockRecipesOnJoin = false;
     
     /**
+     * Delay in seconds before starting recipe key caching after server startup.
+     * 
+     * <p>This allows time for other plugins (ItemsAdder, etc.) to register their
+     * custom recipes before we cache all recipe keys.</p>
+     * 
+     * <p><b>Config key:</b> unlock-recipes-delay</p>
+     * <p><b>Default:</b> 30 seconds</p>
+     */
+    private int unlockRecipesDelay = 30;
+    
+    /**
+     * Number of recipes to process per tick during recipe key caching.
+     * 
+     * <p>Lower values reduce lag spikes but take longer to complete.
+     * Higher values complete faster but may cause brief lag.</p>
+     * 
+     * <p><b>Config key:</b> unlock-recipes-batch-size</p>
+     * <p><b>Default:</b> 100 recipes per tick</p>
+     */
+    private int unlockRecipesBatchSize = 100;
+    
+    /**
+     * Cached list of recipe NamespacedKeys for efficient recipe unlocking on player join.
+     * 
+     * <p>Populated once during plugin enable (after a configurable delay to let other 
+     * plugins register recipes). Caching is done in batches to avoid watchdog timeouts.</p>
+     * 
+     * <p>Set to null until populated. If null when a player joins, player is queued
+     * in {@link #pendingRecipeUnlockPlayers} to be processed once caching completes.</p>
+     */
+    private List<NamespacedKey> cachedRecipeKeys = null;
+    
+    /**
+     * Queue of player UUIDs waiting for recipe unlock.
+     * 
+     * <p>Players who join before recipe key caching is complete are added here.
+     * Once caching finishes, all queued players have their recipes unlocked.</p>
+     */
+    private final Set<UUID> pendingRecipeUnlockPlayers = ConcurrentHashMap.newKeySet();
+    
+    /**
      * Cached list of top player balances to minimize expensive economy lookups.
      * 
      * <p><b>Structure:</b> List of Map.Entry&lt;UUID, Double&gt; sorted by balance descending</p>
@@ -635,10 +676,17 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] WARNING: Vault economy not found - balance leaderboard signs will not work!", NamedTextColor.YELLOW));
         }
         
-        // Load unlock-recipes config option
+        // Load unlock-recipes config options
         unlockRecipesOnJoin = getConfig().getBoolean("unlock-recipes", false);
+        unlockRecipesDelay = getConfig().getInt("unlock-recipes-delay", 30);
+        unlockRecipesBatchSize = getConfig().getInt("unlock-recipes-batch-size", 100);
         if (unlockRecipesOnJoin) {
-            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Recipe unlock on join enabled", NamedTextColor.GREEN));
+            getServer().getConsoleSender().sendMessage(Component.text("[PixelsEssentials] Recipe unlock on join enabled (delay: " + unlockRecipesDelay + "s, batch: " + unlockRecipesBatchSize + ")", NamedTextColor.GREEN));
+            
+            // Schedule batched recipe key caching after delay to let other plugins register their recipes
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                cacheRecipeKeysInBatches();
+            }, unlockRecipesDelay * 20L);
         }
         
         // Load lobby world name for keeppos respawning
@@ -1236,8 +1284,12 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
     /**
      * Handles player join events to unlock all recipes if configured.
      * 
-     * <p>When unlock-recipes is true in config.yml, all registered recipes
-     * (vanilla and custom) are discovered for the player on join.</p>
+     * <p>When unlock-recipes is true in config.yml, all cached recipe keys
+     * are discovered for the player on join. Uses pre-cached keys to avoid
+     * the expensive Bukkit.recipeIterator() call.</p>
+     * 
+     * <p>If caching is not yet complete, the player is added to a pending queue
+     * and will have recipes unlocked once caching finishes.</p>
      * 
      * @param event The PlayerJoinEvent
      */
@@ -1246,25 +1298,107 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
         if (!unlockRecipesOnJoin) return;
         
         Player player = event.getPlayer();
-        int unlocked = 0;
+        UUID uuid = player.getUniqueId();
         
-        // Iterate through all registered recipes
-        Iterator<org.bukkit.inventory.Recipe> recipeIterator = Bukkit.recipeIterator();
-        while (recipeIterator.hasNext()) {
-            org.bukkit.inventory.Recipe recipe = recipeIterator.next();
-            
-            // Only Keyed recipes can be discovered
-            if (recipe instanceof Keyed) {
-                NamespacedKey key = ((Keyed) recipe).getKey();
-                if (player.discoverRecipe(key)) {
-                    unlocked++;
-                }
+        // If recipe keys haven't been cached yet, queue this player
+        if (cachedRecipeKeys == null) {
+            pendingRecipeUnlockPlayers.add(uuid);
+            if (debugMode) {
+                getLogger().info("[DEBUG] Recipe keys not yet cached, queued " + player.getName() + " for later unlock");
+            }
+            return;
+        }
+        
+        // Use cached keys to unlock recipes
+        unlockRecipesForPlayer(player);
+    }
+    
+    /**
+     * Unlocks all cached recipes for a player.
+     * 
+     * @param player The player to unlock recipes for
+     */
+    private void unlockRecipesForPlayer(Player player) {
+        if (cachedRecipeKeys == null || !player.isOnline()) return;
+        
+        int unlocked = 0;
+        for (NamespacedKey key : cachedRecipeKeys) {
+            if (player.discoverRecipe(key)) {
+                unlocked++;
             }
         }
         
         if (debugMode && unlocked > 0) {
-            getLogger().info("Unlocked " + unlocked + " new recipes for " + player.getName());
+            getLogger().info("[DEBUG] Unlocked " + unlocked + " new recipes for " + player.getName());
         }
+    }
+    
+    /**
+     * Caches all recipe NamespacedKeys in batches to avoid watchdog timeouts.
+     * 
+     * <p>Processes {@link #unlockRecipesBatchSize} recipes per tick, spreading the
+     * expensive toBukkitRecipe() conversion across multiple server ticks.</p>
+     * 
+     * <p>Once caching is complete, any players in {@link #pendingRecipeUnlockPlayers}
+     * are processed to have their recipes unlocked.</p>
+     */
+    private void cacheRecipeKeysInBatches() {
+        final List<NamespacedKey> tempCache = new ArrayList<>();
+        final Iterator<org.bukkit.inventory.Recipe> recipeIterator = Bukkit.recipeIterator();
+        
+        getServer().getConsoleSender().sendMessage(Component.text(
+            "[PixelsEssentials] Starting batched recipe caching (batch size: " + unlockRecipesBatchSize + ")...", 
+            NamedTextColor.YELLOW));
+        
+        new org.bukkit.scheduler.BukkitRunnable() {
+            @Override
+            public void run() {
+                int processed = 0;
+                
+                while (recipeIterator.hasNext() && processed < unlockRecipesBatchSize) {
+                    try {
+                        org.bukkit.inventory.Recipe recipe = recipeIterator.next();
+                        if (recipe instanceof Keyed) {
+                            tempCache.add(((Keyed) recipe).getKey());
+                        }
+                    } catch (Exception e) {
+                        // Skip problematic recipes
+                        if (debugMode) {
+                            getLogger().warning("[DEBUG] Skipped problematic recipe: " + e.getMessage());
+                        }
+                    }
+                    processed++;
+                }
+                
+                // Check if done
+                if (!recipeIterator.hasNext()) {
+                    cancel();
+                    
+                    // Finalize cache
+                    cachedRecipeKeys = tempCache;
+                    
+                    getServer().getConsoleSender().sendMessage(Component.text(
+                        "[PixelsEssentials] Cached " + cachedRecipeKeys.size() + " recipe keys for unlock-on-join", 
+                        NamedTextColor.GREEN));
+                    
+                    // Process any players who joined while caching was in progress
+                    if (!pendingRecipeUnlockPlayers.isEmpty()) {
+                        int queuedCount = pendingRecipeUnlockPlayers.size();
+                        for (UUID uuid : pendingRecipeUnlockPlayers) {
+                            Player player = Bukkit.getPlayer(uuid);
+                            if (player != null && player.isOnline()) {
+                                unlockRecipesForPlayer(player);
+                            }
+                        }
+                        pendingRecipeUnlockPlayers.clear();
+                        
+                        if (debugMode) {
+                            getLogger().info("[DEBUG] Processed " + queuedCount + " queued players for recipe unlock");
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(this, 0L, 1L);
     }
     
     /**
@@ -2226,8 +2360,19 @@ public class PixelsEssentials extends JavaPlugin implements CommandExecutor, Tab
             
             // Reload config values
             unlockRecipesOnJoin = getConfig().getBoolean("unlock-recipes", false);
+            unlockRecipesDelay = getConfig().getInt("unlock-recipes-delay", 30);
+            unlockRecipesBatchSize = getConfig().getInt("unlock-recipes-batch-size", 100);
             signUpdateInterval = getConfig().getInt("sign-update-interval", 60);
             lobbyWorldName = getConfig().getString("lobby-world", "world");
+            
+            // Clear recipe cache and pending queue
+            cachedRecipeKeys = null;
+            pendingRecipeUnlockPlayers.clear();
+            
+            // Re-cache recipe keys if unlock-recipes is enabled (no delay on reload)
+            if (unlockRecipesOnJoin) {
+                cacheRecipeKeysInBatches();
+            }
             
             // Clear player data cache so it reloads from disk on next access
             playerDataCache.clear();
